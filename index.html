@@ -1,0 +1,1071 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>作業訂正與未交追蹤系統</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#eef2ff',
+                            100: '#e0e7ff',
+                            500: '#6366f1',
+                            600: '#4f46e5',
+                            700: '#4338ca',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;700&display=swap');
+        body {
+            font-family: 'Noto Sans TC', sans-serif;
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background-color: #cbd5e1;
+            border-radius: 9999px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background-color: #f1f5f9;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col">
+
+    <header class="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+                <div class="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center shadow-md shadow-indigo-100">
+                    <i class="fa-solid fa-clipboard-check text-lg"></i>
+                </div>
+                <div>
+                    <h1 class="text-lg font-bold text-slate-900 leading-tight">作業訂正與未交追蹤系統</h1>
+                    <p class="text-xs text-slate-500">專為教師與導師設計的催交與班級經營工作台</p>
+                </div>
+            </div>
+            
+            <div class="flex items-center space-x-2">
+                <!-- 雲端記憶與儲存狀態標籤 -->
+                <div id="sync-status" class="inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-medium border border-emerald-200">
+                    <span id="sync-dot" class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+                    <span id="sync-text">雲端資料已連線</span>
+                </div>
+
+                <button onclick="openRosterModal()" class="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 text-xs font-medium transition">
+                    <i class="fa-solid fa-users-gear text-slate-500"></i>
+                    <span class="hidden sm:inline">名冊管理</span>
+                </button>
+                <button onclick="openNewAssignmentModal()" class="inline-flex items-center space-x-1.5 px-3.5 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 text-xs font-medium shadow-sm transition">
+                    <i class="fa-solid fa-plus"></i>
+                    <span>發布新作業</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 flex-1 w-full space-y-6">
+
+        <!-- 儀表板統計區塊 -->
+        <section class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center space-x-3">
+                <div class="w-12 h-12 rounded-lg bg-rose-50 text-rose-600 flex items-center justify-center shrink-0">
+                    <i class="fa-solid fa-circle-xmark text-xl"></i>
+                </div>
+                <div>
+                    <div class="text-2xl font-bold text-slate-900" id="stat-missing-count">0</div>
+                    <div class="text-xs text-slate-500">當前作業未繳交</div>
+                </div>
+            </div>
+
+            <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center space-x-3">
+                <div class="w-12 h-12 rounded-lg bg-amber-50 text-amber-600 flex items-center justify-center shrink-0">
+                    <i class="fa-solid fa-pen-ruler text-xl"></i>
+                </div>
+                <div>
+                    <div class="text-2xl font-bold text-slate-900" id="stat-correction-count">0</div>
+                    <div class="text-xs text-slate-500">待訂正 / 重改中</div>
+                </div>
+            </div>
+
+            <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center space-x-3">
+                <div class="w-12 h-12 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center shrink-0">
+                    <i class="fa-solid fa-circle-check text-xl"></i>
+                </div>
+                <div>
+                    <div class="text-2xl font-bold text-slate-900" id="stat-completed-rate">0%</div>
+                    <div class="text-xs text-slate-500">當前作業過關率</div>
+                </div>
+            </div>
+
+            <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex items-center space-x-3">
+                <div class="w-12 h-12 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center shrink-0">
+                    <i class="fa-solid fa-book-bookmark text-xl"></i>
+                </div>
+                <div>
+                    <div class="text-2xl font-bold text-slate-900" id="stat-total-assignments">0</div>
+                    <div class="text-xs text-slate-500">進行中追蹤項目</div>
+                </div>
+            </div>
+        </section>
+
+        <section class="bg-white rounded-xl border border-slate-200 shadow-sm p-4 space-y-4">
+            <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+                <div class="flex items-center space-x-3">
+                    <span class="text-xs font-semibold text-slate-400 uppercase tracking-wider">切換作業：</span>
+                    <select id="assignment-select" onchange="switchAssignment(this.value)" class="text-sm font-semibold text-slate-800 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white min-w-[220px]">
+                        <!-- Options generated by JS -->
+                    </select>
+                    <span id="current-badge-subject" class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-50 text-indigo-700">
+                        數學
+                    </span>
+                    <span id="current-badge-due" class="text-xs text-slate-500 flex items-center gap-1">
+                        <i class="fa-regular fa-clock text-slate-400"></i> 今日應交
+                    </span>
+                </div>
+
+                <!-- 動作按鈕群 -->
+                <div class="flex flex-wrap items-center gap-2">
+                    <button onclick="batchMarkAll('completed')" class="px-3 py-1.5 text-xs font-medium text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-lg transition">
+                        <i class="fa-solid fa-check-double mr-1"></i> 全班已交已過
+                    </button>
+                    <button onclick="batchMarkAll('missing')" class="px-3 py-1.5 text-xs font-medium text-rose-700 bg-rose-50 hover:bg-rose-100 rounded-lg transition">
+                        <i class="fa-solid fa-rotate-left mr-1"></i> 重設為全未交
+                    </button>
+                    <button onclick="openLineSummaryModal()" class="px-3 py-1.5 text-xs font-medium text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm transition">
+                        <i class="fa-brands fa-line mr-1 text-sm"></i> 生成聯絡簿通報
+                    </button>
+                    <button onclick="deleteCurrentAssignment()" class="px-2.5 py-1.5 text-xs font-medium text-slate-400 hover:text-rose-600 rounded-lg hover:bg-slate-100 transition" title="刪除此項作業">
+                        <i class="fa-regular fa-trash-can"></i>
+                    </button>
+                </div>
+            </div>
+
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                <div class="flex items-center space-x-1 bg-slate-100 p-1 rounded-lg">
+                    <button onclick="filterStatus('all')" id="tab-all" class="filter-tab px-3 py-1.5 rounded-md font-medium text-slate-800 bg-white shadow-sm transition">全部學生</button>
+                    <button onclick="filterStatus('missing')" id="tab-missing" class="filter-tab px-3 py-1.5 rounded-md font-medium text-slate-600 hover:text-slate-900 transition">未繳交 (<span id="count-tab-missing">0</span>)</button>
+                    <button onclick="filterStatus('correcting')" id="tab-correcting" class="filter-tab px-3 py-1.5 rounded-md font-medium text-slate-600 hover:text-slate-900 transition">待訂正 (<span id="count-tab-correcting">0</span>)</button>
+                    <button onclick="filterStatus('completed')" id="tab-completed" class="filter-tab px-3 py-1.5 rounded-md font-medium text-slate-600 hover:text-slate-900 transition">已過關 (<span id="count-tab-completed">0</span>)</button>
+                </div>
+                
+                <div class="flex items-center space-x-3 text-slate-500 text-xs">
+                    <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-full bg-rose-500 inline-block"></span> 未繳交</span>
+                    <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-full bg-amber-500 inline-block"></span> 待訂正</span>
+                    <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-full bg-blue-500 inline-block"></span> 待二次核驗</span>
+                    <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded-full bg-emerald-500 inline-block"></span> 已過關</span>
+                </div>
+            </div>
+        </section>
+
+        <section>
+            <div class="flex items-center justify-between mb-3 px-1">
+                <div class="text-sm font-semibold text-slate-700">
+                    點擊學生卡片可快速循環切換狀態，或點擊更多圖示填寫原因備註：
+                </div>
+                <div class="text-xs text-slate-400">點擊卡片循環切換狀態</div>
+            </div>
+            
+            <!-- 學生卡片容器 -->
+            <div id="student-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
+                <!-- Javascript will populate students here -->
+            </div>
+        </section>
+
+        <section class="bg-indigo-50/60 rounded-xl border border-indigo-100 p-4">
+            <div class="flex items-start space-x-3">
+                <div class="w-8 h-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center shrink-0 mt-0.5">
+                    <i class="fa-solid fa-lightbulb"></i>
+                </div>
+                <div class="space-y-1 text-xs text-indigo-950">
+                    <div class="font-bold text-sm">💡 設計小叮嚀：您目前想到的 vs. 還能加強的實務細節</div>
+                    <p class="text-indigo-800 leading-relaxed">
+                        除了基礎的<strong>姓名</strong>與<strong>作業項目</strong>，本系統已為您實作：
+                        <span class="font-semibold text-indigo-900">1. 四段式循環切換狀態</span>（點一下就換狀態，省去大量下拉選單時間）、
+                        <span class="font-semibold text-indigo-900">2. 欠交/訂正原因標籤</span>（如忘了帶、字跡太亂、缺簽名）、
+                        <span class="font-semibold text-indigo-900">3. 一鍵生成通報文案</span>（直接貼上親師 LINE 群）、
+                        <span class="font-semibold text-indigo-900">4. 個人累計黑名單履歷</span>。
+                    </p>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <div id="modal-new-assignment" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+                <h3 class="font-bold text-slate-900 text-base">新增作業追蹤項目</h3>
+                <button onclick="closeModal('modal-new-assignment')" class="text-slate-400 hover:text-slate-600 text-lg">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <form onsubmit="handleCreateAssignment(event)" class="p-6 space-y-4">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-700 mb-1">科目分類</label>
+                    <select id="new-subject" class="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                        <option value="數學">📐 數學</option>
+                        <option value="國語">📖 國語</option>
+                        <option value="英文">🔤 英文</option>
+                        <option value="自然">🔬 自然</option>
+                        <option value="社會">🌏 社會</option>
+                        <option value="生活/其他">🎨 其他</option>
+                    </select>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-700 mb-1">作業名稱 / 範圍</label>
+                    <input type="text" id="new-title" required placeholder="例如：數學習作 P.42-45" class="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-700 mb-1">預計繳交 / 訂正截止日</label>
+                    <input type="date" id="new-due" required class="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-700 mb-1">備註要求（選填）</label>
+                    <input type="text" id="new-note" placeholder="如：須用紅筆訂正並附計算過程" class="w-full text-sm border border-slate-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 focus:outline-none">
+                </div>
+
+                <div class="pt-2 flex justify-end space-x-2">
+                    <button type="button" onclick="closeModal('modal-new-assignment')" class="px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-lg">取消</button>
+                    <button type="submit" class="px-4 py-2 text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm">立即新增</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div id="modal-student-detail" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden">
+            <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+                <div>
+                    <h3 class="font-bold text-slate-900 text-base" id="modal-student-name">學生詳細狀況</h3>
+                    <span class="text-xs text-slate-400" id="modal-student-seat">座號：--</span>
+                </div>
+                <button onclick="closeModal('modal-student-detail')" class="text-slate-400 hover:text-slate-600 text-lg">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <div class="p-6 space-y-4">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-700 mb-1">當前作業狀態</label>
+                    <div class="grid grid-cols-2 gap-2" id="modal-status-picker">
+                        <!-- Rendered by JS -->
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-700 mb-1">欠交/待訂正原因標籤</label>
+                    <div class="flex flex-wrap gap-1.5" id="modal-reason-tags">
+                        <!-- Tags rendered by JS -->
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-700 mb-1">自訂詳細備註</label>
+                    <textarea id="modal-student-custom-note" rows="2" placeholder="如：已電話通知家長確認、明日早自習補交..." class="w-full text-sm border border-slate-300 rounded-lg p-2.5 focus:ring-2 focus:ring-indigo-500 focus:outline-none"></textarea>
+                </div>
+
+                <div class="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                    <div class="text-xs font-semibold text-slate-700 mb-1 flex items-center justify-between">
+                        <span>歷史累積欠交/訂正紀錄</span>
+                        <span id="student-history-badge" class="text-rose-600 font-bold">累積 0 次</span>
+                    </div>
+                    <div id="student-history-list" class="text-xs text-slate-500 space-y-1 max-h-24 overflow-y-auto custom-scrollbar">
+                        <!-- History items -->
+                    </div>
+                </div>
+
+                <div class="pt-2 flex justify-end space-x-2">
+                    <button type="button" onclick="closeModal('modal-student-detail')" class="px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-lg">取消</button>
+                    <button type="button" onclick="saveStudentDetail()" class="px-4 py-2 text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm">儲存更新</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="modal-roster" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden">
+            <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+                <h3 class="font-bold text-slate-900 text-base">班級學生名冊管理</h3>
+                <button onclick="closeModal('modal-roster')" class="text-slate-400 hover:text-slate-600 text-lg">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <div class="p-6 space-y-4">
+                <p class="text-xs text-slate-500">
+                    每行輸入一位學生，格式為：<code class="bg-slate-100 px-1 py-0.5 rounded text-indigo-600 font-mono">座號 姓名</code>（例如：<code class="bg-slate-100 px-1 py-0.5 rounded text-indigo-600 font-mono">01 王小明</code>）
+                </p>
+                <textarea id="roster-textarea" rows="10" class="w-full font-mono text-sm border border-slate-300 rounded-lg p-3 focus:ring-2 focus:ring-indigo-500 focus:outline-none custom-scrollbar" placeholder="01 王小明&#10;02 李大華&#10;03 陳品妤"></textarea>
+                
+                <div class="flex items-center justify-between pt-2">
+                    <button type="button" onclick="loadSampleRoster()" class="text-xs text-indigo-600 hover:underline">
+                        載入範例名冊 (20人)
+                    </button>
+                    <div class="flex space-x-2">
+                        <button type="button" onclick="closeModal('modal-roster')" class="px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-lg">取消</button>
+                        <button type="button" onclick="saveRoster()" class="px-4 py-2 text-xs font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg shadow-sm">更新全班名單</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="modal-line-summary" class="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+        <div class="bg-white rounded-2xl shadow-xl w-full max-w-lg overflow-hidden">
+            <div class="px-6 py-4 border-b border-slate-100 flex items-center justify-between">
+                <div class="flex items-center space-x-2">
+                    <i class="fa-brands fa-line text-emerald-500 text-xl"></i>
+                    <h3 class="font-bold text-slate-900 text-base">聯絡簿 / LINE 家長群通報格式</h3>
+                </div>
+                <button onclick="closeModal('modal-line-summary')" class="text-slate-400 hover:text-slate-600 text-lg">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <div class="p-6 space-y-4">
+                <p class="text-xs text-slate-500">
+                    已自動依照當前作業整理未交與待訂正清單，可直接點擊「一鍵複製」發送：
+                </p>
+                
+                <textarea id="line-output-text" rows="8" readonly class="w-full bg-slate-50 font-sans text-sm border border-slate-200 rounded-lg p-3 text-slate-800 focus:outline-none custom-scrollbar select-all"></textarea>
+
+                <div class="flex items-center justify-between pt-2">
+                    <span id="copy-status" class="text-xs text-emerald-600 font-medium opacity-0 transition-opacity">已複製到剪貼簿！</span>
+                    <div class="flex space-x-2">
+                        <button type="button" onclick="closeModal('modal-line-summary')" class="px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-lg">關閉</button>
+                        <button type="button" onclick="copyLineText()" class="px-4 py-2 text-xs font-medium text-white bg-emerald-600 hover:bg-emerald-700 rounded-lg shadow-sm flex items-center gap-1.5">
+                            <i class="fa-regular fa-copy"></i> 一鍵複製文案
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="toast" class="fixed bottom-5 right-5 z-50 transform translate-y-10 opacity-0 pointer-events-none transition-all duration-300 bg-slate-900 text-white px-4 py-2.5 rounded-xl shadow-lg flex items-center space-x-2 text-xs">
+        <i id="toast-icon" class="fa-solid fa-circle-check text-emerald-400"></i>
+        <span id="toast-message">操作完成</span>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // 常見原因標籤庫
+        const REASON_PRESETS = ["忘記帶到校", "未完成空白", "字體潦草需重寫", "錯誤未訂正", "缺少家長簽名", "請假補課中"];
+
+        // 狀態常數與設定
+        const STATUS_CONFIG = {
+            missing: {
+                id: 'missing',
+                name: '未繳交',
+                badgeBg: 'bg-rose-50',
+                badgeText: 'text-rose-600',
+                cardBorder: 'border-rose-300',
+                cardBg: 'bg-rose-50/40',
+                icon: 'fa-circle-xmark'
+            },
+            correcting: {
+                id: 'correcting',
+                name: '待訂正',
+                badgeBg: 'bg-amber-50',
+                badgeText: 'text-amber-600',
+                cardBorder: 'border-amber-300',
+                cardBg: 'bg-amber-50/40',
+                icon: 'fa-pen-ruler'
+            },
+            rechecking: {
+                id: 'rechecking',
+                name: '待二次核驗',
+                badgeBg: 'bg-blue-50',
+                badgeText: 'text-blue-600',
+                cardBorder: 'border-blue-300',
+                cardBg: 'bg-blue-50/40',
+                icon: 'fa-clock-rotate-left'
+            },
+            completed: {
+                id: 'completed',
+                name: '已過關',
+                badgeBg: 'bg-emerald-50',
+                badgeText: 'text-emerald-600',
+                cardBorder: 'border-slate-200',
+                cardBg: 'bg-white',
+                icon: 'fa-circle-check'
+            }
+        };
+
+        // 預設學生名冊
+        let students = [
+            { id: 1, seat: "01", name: "王品潔" },
+            { id: 2, seat: "02", name: "李冠廷" },
+            { id: 3, seat: "03", name: "張語恩" },
+            { id: 4, seat: "04", name: "陳奕安" },
+            { id: 5, seat: "05", name: "林欣妍" },
+            { id: 6, seat: "06", name: "黃柏凱" },
+            { id: 7, seat: "07", name: "趙晨宇" },
+            { id: 8, seat: "08", name: "吳沛璇" },
+            { id: 9, seat: "09", name: "徐子豪" },
+            { id: 10, seat: "10", name: "周子恩" },
+            { id: 11, seat: "11", name: "鄭宇翔" },
+            { id: 12, seat: "12", name: "謝羽珊" }
+        ];
+
+        // 預設作業項目
+        let assignments = [
+            {
+                id: "hw-1",
+                subject: "數學",
+                title: "數學習作第 4 章練習 P.36-39",
+                due: "2026-10-12",
+                note: "請務必列出完整計算過程，未列算式需退回重寫",
+                records: {
+                    1: { status: 'completed', reasons: [], note: '' },
+                    2: { status: 'missing', reasons: ['忘記帶到校'], note: '在安親班未帶回' },
+                    3: { status: 'correcting', reasons: ['錯誤未訂正'], note: '第 3 題應用題計算錯誤' },
+                    4: { status: 'completed', reasons: [], note: '' },
+                    5: { status: 'rechecking', reasons: ['字體潦草需重寫'], note: '已二次補交' },
+                    6: { status: 'missing', reasons: ['未完成空白'], note: '後半頁空白' },
+                    7: { status: 'completed', reasons: [], note: '' },
+                    8: { status: 'correcting', reasons: ['缺少家長簽名'], note: '' },
+                    9: { status: 'completed', reasons: [], note: '' },
+                    10: { status: 'completed', reasons: [], note: '' },
+                    11: { status: 'missing', reasons: ['請假補課中'], note: '今日病假' },
+                    12: { status: 'completed', reasons: [], note: '' }
+                }
+            },
+            {
+                id: "hw-2",
+                subject: "國語",
+                title: "第七課生字語詞習寫乙本",
+                due: "2026-10-13",
+                note: "注意部首與筆畫正確性",
+                records: {}
+            }
+        ];
+
+        let currentAssignmentId = "hw-1";
+        let currentFilter = "all";
+        let activeEditingStudentId = null;
+
+        // 雲端資料庫實例與環境設定
+        let db = null;
+        let auth = null;
+        let currentUser = null;
+        let saveTimeout = null;
+
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'homework-tracker-app';
+
+        async function initCloudSync() {
+            try {
+                if (typeof __firebase_config === 'undefined') {
+                    updateSyncUI('offline', '離線單機模式');
+                    return;
+                }
+
+                updateSyncUI('saving', '連線雲端資料庫...');
+                const firebaseConfig = JSON.parse(__firebase_config);
+                const app = initializeApp(firebaseConfig);
+                auth = getAuth(app);
+                db = getFirestore(app);
+
+                // 優先使用自訂授權權杖，否則匿名登入
+                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+
+                currentUser = auth.currentUser;
+                if (!currentUser) {
+                    updateSyncUI('offline', '尚未授權');
+                    return;
+                }
+
+                updateSyncUI('synced', '雲端同步就緒');
+
+                // 監聽雲端資料庫變更（跨分頁、跨裝置即時更新）
+                const dataDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'homeworkTracker', 'mainState');
+                onSnapshot(dataDocRef, (snap) => {
+                    if (snap.exists()) {
+                        const data = snap.data();
+                        if (data.students && Array.isArray(data.students)) {
+                            students = data.students;
+                        }
+                        if (data.assignments && Array.isArray(data.assignments) && data.assignments.length > 0) {
+                            assignments = data.assignments;
+                            if (!assignments.find(a => a.id === currentAssignmentId)) {
+                                currentAssignmentId = assignments[0].id;
+                            }
+                        }
+                        renderAssignmentSelect();
+                        renderAssignmentDetails();
+                        renderStudentsGrid();
+                        updateStats();
+                        updateSyncUI('synced', '已保存所有變更');
+                    } else {
+                        // 首次載入尚無雲端資料，上傳預設示範資料
+                        saveToCloud(true);
+                    }
+                }, (error) => {
+                    console.error("雲端監聽錯誤:", error);
+                    updateSyncUI('error', '同步受阻');
+                });
+
+            } catch (err) {
+                console.error("雲端初始化失敗:", err);
+                updateSyncUI('offline', '離線單機模式');
+            }
+        }
+
+        function updateSyncUI(status, message) {
+            const syncText = document.getElementById('sync-text');
+            const syncDot = document.getElementById('sync-dot');
+            const syncContainer = document.getElementById('sync-status');
+            if (!syncText || !syncDot || !syncContainer) return;
+
+            syncText.textContent = message;
+            if (status === 'synced') {
+                syncContainer.className = "inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-emerald-50 text-emerald-700 text-xs font-medium border border-emerald-200";
+                syncDot.className = "w-2 h-2 rounded-full bg-emerald-500";
+            } else if (status === 'saving') {
+                syncContainer.className = "inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-amber-50 text-amber-700 text-xs font-medium border border-amber-200";
+                syncDot.className = "w-2 h-2 rounded-full bg-amber-500 animate-pulse";
+            } else if (status === 'offline') {
+                syncContainer.className = "inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-slate-100 text-slate-600 text-xs font-medium border border-slate-200";
+                syncDot.className = "w-2 h-2 rounded-full bg-slate-400";
+            } else {
+                syncContainer.className = "inline-flex items-center space-x-1.5 px-2.5 py-1 rounded-full bg-rose-50 text-rose-700 text-xs font-medium border border-rose-200";
+                syncDot.className = "w-2 h-2 rounded-full bg-rose-500";
+            }
+        }
+
+        // 自動防抖寫入雲端
+        function saveToCloud(immediate = false) {
+            if (!db || !currentUser) return;
+
+            updateSyncUI('saving', '儲存中...');
+            if (saveTimeout) clearTimeout(saveTimeout);
+
+            const performSave = async () => {
+                try {
+                    const dataDocRef = doc(db, 'artifacts', appId, 'public', 'data', 'homeworkTracker', 'mainState');
+                    await setDoc(dataDocRef, {
+                        students,
+                        assignments,
+                        lastUpdated: Date.now()
+                    });
+                    updateSyncUI('synced', '已自動儲存');
+                } catch (e) {
+                    console.error("雲端存檔失敗:", e);
+                    updateSyncUI('error', '儲存失敗');
+                }
+            };
+
+            if (immediate) {
+                performSave();
+            } else {
+                saveTimeout = setTimeout(performSave, 600);
+            }
+        }
+
+        function getCurrentAssignment() {
+            return assignments.find(a => a.id === currentAssignmentId) || assignments[0];
+        }
+
+        function showToast(message, type = "success") {
+            const toast = document.getElementById('toast');
+            const toastMsg = document.getElementById('toast-message');
+            const toastIcon = document.getElementById('toast-icon');
+
+            toastMsg.innerText = message;
+            if (type === "success") {
+                toastIcon.className = "fa-solid fa-circle-check text-emerald-400";
+            } else if (type === "error") {
+                toastIcon.className = "fa-solid fa-circle-exclamation text-rose-400";
+            } else {
+                toastIcon.className = "fa-solid fa-info text-blue-400";
+            }
+
+            toast.classList.remove('opacity-0', 'translate-y-10', 'pointer-events-none');
+            setTimeout(() => {
+                toast.classList.add('opacity-0', 'translate-y-10', 'pointer-events-none');
+            }, 2500);
+        }
+
+        function openModal(id) {
+            document.getElementById(id).classList.remove('hidden');
+        }
+
+        function closeModal(id) {
+            document.getElementById(id).classList.add('hidden');
+        }
+
+        function initApp() {
+            const todayStr = new Date().toISOString().split('T')[0];
+            document.getElementById('new-due').value = todayStr;
+
+            renderAssignmentSelect();
+            renderAssignmentDetails();
+            renderStudentsGrid();
+            updateStats();
+
+            // 啟動雲端記憶連線
+            initCloudSync();
+        }
+
+        function renderAssignmentSelect() {
+            const select = document.getElementById('assignment-select');
+            select.innerHTML = '';
+            assignments.forEach(asg => {
+                const opt = document.createElement('option');
+                opt.value = asg.id;
+                opt.textContent = `[${asg.subject}] ${asg.title}`;
+                if (asg.id === currentAssignmentId) opt.selected = true;
+                select.appendChild(opt);
+            });
+        }
+
+        function switchAssignment(id) {
+            currentAssignmentId = id;
+            renderAssignmentDetails();
+            renderStudentsGrid();
+            updateStats();
+        }
+
+        function renderAssignmentDetails() {
+            const asg = getCurrentAssignment();
+            if (!asg) return;
+
+            document.getElementById('current-badge-subject').textContent = asg.subject;
+            document.getElementById('current-badge-due').innerHTML = `<i class="fa-regular fa-clock text-slate-400"></i> 截止：${asg.due}`;
+        }
+
+        function renderStudentsGrid() {
+            const asg = getCurrentAssignment();
+            const grid = document.getElementById('student-grid');
+            grid.innerHTML = '';
+
+            let missingCount = 0;
+            let correctingCount = 0;
+            let completedCount = 0;
+
+            students.forEach(student => {
+                if (!asg.records[student.id]) {
+                    asg.records[student.id] = { status: 'missing', reasons: [], note: '' };
+                }
+
+                const rec = asg.records[student.id];
+                if (rec.status === 'missing') missingCount++;
+                if (rec.status === 'correcting' || rec.status === 'rechecking') correctingCount++;
+                if (rec.status === 'completed') completedCount++;
+
+                if (currentFilter === 'missing' && rec.status !== 'missing') return;
+                if (currentFilter === 'correcting' && rec.status !== 'correcting' && rec.status !== 'rechecking') return;
+                if (currentFilter === 'completed' && rec.status !== 'completed') return;
+
+                const cfg = STATUS_CONFIG[rec.status] || STATUS_CONFIG.missing;
+
+                const card = document.createElement('div');
+                card.className = `group relative rounded-xl border ${cfg.cardBorder} ${cfg.cardBg} p-3 transition-all hover:shadow-md cursor-pointer flex flex-col justify-between`;
+                
+                card.onclick = (e) => {
+                    if (e.target.closest('.action-btn')) return;
+                    cycleStudentStatus(student.id);
+                };
+
+                const reasonBadges = (rec.reasons && rec.reasons.length > 0)
+                    ? `<div class="flex flex-wrap gap-1 mt-1.5">
+                        ${rec.reasons.map(r => `<span class="bg-white/80 border border-slate-200 text-slate-600 text-[10px] px-1.5 py-0.5 rounded">${r}</span>`).join('')}
+                       </div>`
+                    : '';
+
+                const noteSnippet = rec.note 
+                    ? `<div class="text-[10px] text-slate-500 truncate mt-1 italic" title="${rec.note}"><i class="fa-regular fa-comment-dots text-slate-400"></i> ${rec.note}</div>`
+                    : '';
+
+                card.innerHTML = `
+                    <div>
+                        <div class="flex items-center justify-between mb-1">
+                            <span class="font-mono text-xs font-bold text-slate-400">#${student.seat}</span>
+                            <span class="inline-flex items-center text-[11px] font-semibold px-2 py-0.5 rounded-full ${cfg.badgeBg} ${cfg.badgeText}">
+                                <i class="fa-solid ${cfg.icon} mr-1 text-[10px]"></i> ${cfg.name}
+                            </span>
+                        </div>
+                        <div class="text-sm font-bold text-slate-800">${student.name}</div>
+                        ${reasonBadges}
+                        ${noteSnippet}
+                    </div>
+
+                    <div class="pt-2 mt-2 border-t border-slate-200/60 flex items-center justify-between text-xs text-slate-400">
+                        <span class="text-[10px]">點擊切換狀態</span>
+                        <button class="action-btn text-slate-400 hover:text-indigo-600 p-1 rounded hover:bg-slate-100 transition" onclick="openStudentDetailModal(${student.id})" title="填寫原因/備註">
+                            <i class="fa-solid fa-ellipsis-vertical"></i>
+                        </button>
+                    </div>
+                `;
+
+                grid.appendChild(card);
+            });
+
+            document.getElementById('count-tab-missing').textContent = missingCount;
+            document.getElementById('count-tab-correcting').textContent = correctingCount;
+            document.getElementById('count-tab-completed').textContent = completedCount;
+        }
+
+        function cycleStudentStatus(studentId) {
+            const asg = getCurrentAssignment();
+            const current = asg.records[studentId]?.status || 'missing';
+
+            const flow = ['missing', 'correcting', 'rechecking', 'completed'];
+            const nextIndex = (flow.indexOf(current) + 1) % flow.length;
+            const nextStatus = flow[nextIndex];
+
+            asg.records[studentId].status = nextStatus;
+
+            if (nextStatus === 'completed') {
+                asg.records[studentId].reasons = [];
+            }
+
+            renderStudentsGrid();
+            updateStats();
+            saveToCloud(); // 觸發自動存檔
+        }
+
+        function updateStats() {
+            const asg = getCurrentAssignment();
+            const total = students.length;
+            if (total === 0) return;
+
+            let missing = 0;
+            let correcting = 0;
+            let completed = 0;
+
+            students.forEach(s => {
+                const stat = asg.records[s.id]?.status || 'missing';
+                if (stat === 'missing') missing++;
+                else if (stat === 'correcting' || stat === 'rechecking') correcting++;
+                else if (stat === 'completed') completed++;
+            });
+
+            document.getElementById('stat-missing-count').textContent = missing;
+            document.getElementById('stat-correction-count').textContent = correcting;
+            const rate = Math.round((completed / total) * 100);
+            document.getElementById('stat-completed-rate').textContent = `${rate}%`;
+            document.getElementById('stat-total-assignments').textContent = assignments.length;
+        }
+
+        function batchMarkAll(statusKey) {
+            const asg = getCurrentAssignment();
+            students.forEach(s => {
+                if (!asg.records[s.id]) asg.records[s.id] = { status: statusKey, reasons: [], note: '' };
+                asg.records[s.id].status = statusKey;
+                if (statusKey === 'completed') {
+                    asg.records[s.id].reasons = [];
+                }
+            });
+            renderStudentsGrid();
+            updateStats();
+            saveToCloud(); // 儲存變更
+            showToast(`已將全班標記為「${STATUS_CONFIG[statusKey].name}」`);
+        }
+
+        function filterStatus(status) {
+            currentFilter = status;
+            document.querySelectorAll('.filter-tab').forEach(btn => {
+                btn.classList.remove('bg-white', 'text-slate-800', 'shadow-sm');
+                btn.classList.add('text-slate-600');
+            });
+            const activeBtn = document.getElementById(`tab-${status}`);
+            if (activeBtn) {
+                activeBtn.classList.add('bg-white', 'text-slate-800', 'shadow-sm');
+                activeBtn.classList.remove('text-slate-600');
+            }
+            renderStudentsGrid();
+        }
+
+        function openNewAssignmentModal() {
+            openModal('modal-new-assignment');
+        }
+
+        function handleCreateAssignment(e) {
+            e.preventDefault();
+            const subject = document.getElementById('new-subject').value;
+            const title = document.getElementById('new-title').value.trim();
+            const due = document.getElementById('new-due').value;
+            const note = document.getElementById('new-note').value.trim();
+
+            const newId = `hw-${Date.now()}`;
+            const newAsg = {
+                id: newId,
+                subject,
+                title,
+                due,
+                note,
+                records: {}
+            };
+
+            students.forEach(s => {
+                newAsg.records[s.id] = { status: 'missing', reasons: [], note: '' };
+            });
+
+            assignments.unshift(newAsg);
+            currentAssignmentId = newId;
+
+            closeModal('modal-new-assignment');
+            e.target.reset();
+            const todayStr = new Date().toISOString().split('T')[0];
+            document.getElementById('new-due').value = todayStr;
+
+            renderAssignmentSelect();
+            renderAssignmentDetails();
+            renderStudentsGrid();
+            updateStats();
+            saveToCloud(); // 儲存變更
+            showToast("成功新增作業並已同步至雲端！");
+        }
+
+        function deleteCurrentAssignment() {
+            if (assignments.length <= 1) {
+                showToast("至少需保留一項作業項目", "error");
+                return;
+            }
+            const asg = getCurrentAssignment();
+            assignments = assignments.filter(a => a.id !== asg.id);
+            currentAssignmentId = assignments[0].id;
+
+            renderAssignmentSelect();
+            renderAssignmentDetails();
+            renderStudentsGrid();
+            updateStats();
+            saveToCloud(); // 儲存變更
+            showToast("已刪除該項作業");
+        }
+
+        function openStudentDetailModal(studentId) {
+            activeEditingStudentId = studentId;
+            const student = students.find(s => s.id === studentId);
+            const asg = getCurrentAssignment();
+            const rec = asg.records[studentId] || { status: 'missing', reasons: [], note: '' };
+
+            document.getElementById('modal-student-name').textContent = student.name;
+            document.getElementById('modal-student-seat').textContent = `座號：${student.seat}`;
+            document.getElementById('modal-student-custom-note').value = rec.note || '';
+
+            const picker = document.getElementById('modal-status-picker');
+            picker.innerHTML = '';
+            Object.values(STATUS_CONFIG).forEach(cfg => {
+                const isSelected = rec.status === cfg.id;
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = `p-2 rounded-lg text-xs font-medium border flex items-center justify-center space-x-1.5 transition ${
+                    isSelected ? 'border-indigo-600 bg-indigo-50 text-indigo-700 font-bold' : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                }`;
+                btn.innerHTML = `<i class="fa-solid ${cfg.icon}"></i> <span>${cfg.name}</span>`;
+                btn.onclick = () => {
+                    rec.status = cfg.id;
+                    openStudentDetailModal(studentId);
+                };
+                picker.appendChild(btn);
+            });
+
+            const tagContainer = document.getElementById('modal-reason-tags');
+            tagContainer.innerHTML = '';
+            REASON_PRESETS.forEach(reason => {
+                const hasTag = rec.reasons && rec.reasons.includes(reason);
+                const tag = document.createElement('button');
+                tag.type = 'button';
+                tag.className = `px-2 py-1 text-xs rounded-full border transition ${
+                    hasTag ? 'bg-indigo-600 text-white border-indigo-600' : 'bg-slate-100 text-slate-600 border-slate-200 hover:bg-slate-200'
+                }`;
+                tag.textContent = reason;
+                tag.onclick = () => {
+                    if (!rec.reasons) rec.reasons = [];
+                    if (hasTag) {
+                        rec.reasons = rec.reasons.filter(r => r !== reason);
+                    } else {
+                        rec.reasons.push(reason);
+                    }
+                    openStudentDetailModal(studentId);
+                };
+                tagContainer.appendChild(tag);
+            });
+
+            let totalIssues = 0;
+            const historyList = document.getElementById('student-history-list');
+            historyList.innerHTML = '';
+
+            assignments.forEach(a => {
+                const aRec = a.records[studentId];
+                if (aRec && (aRec.status === 'missing' || aRec.status === 'correcting')) {
+                    totalIssues++;
+                    const item = document.createElement('div');
+                    item.className = 'flex justify-between items-center py-1 border-b border-slate-100 last:border-0';
+                    item.innerHTML = `
+                        <span class="truncate max-w-[200px]">${a.title}</span>
+                        <span class="${aRec.status === 'missing' ? 'text-rose-500' : 'text-amber-500'} font-semibold">
+                            ${STATUS_CONFIG[aRec.status].name}
+                        </span>
+                    `;
+                    historyList.appendChild(item);
+                }
+            });
+
+            document.getElementById('student-history-badge').textContent = `累積欠/待訂正 ${totalIssues} 項`;
+            if (totalIssues === 0) {
+                historyList.innerHTML = `<span class="text-slate-400">目前無欠交或待訂正歷史，表現優異！</span>`;
+            }
+
+            openModal('modal-student-detail');
+        }
+
+        function saveStudentDetail() {
+            if (!activeEditingStudentId) return;
+            const asg = getCurrentAssignment();
+            const note = document.getElementById('modal-student-custom-note').value.trim();
+            if (asg.records[activeEditingStudentId]) {
+                asg.records[activeEditingStudentId].note = note;
+            }
+            closeModal('modal-student-detail');
+            renderStudentsGrid();
+            updateStats();
+            saveToCloud(); // 儲存變更
+            showToast("學生資料已更新並同步！");
+        }
+
+        function openRosterModal() {
+            const textarea = document.getElementById('roster-textarea');
+            textarea.value = students.map(s => `${s.seat} ${s.name}`).join('\n');
+            openModal('modal-roster');
+        }
+
+        function loadSampleRoster() {
+            const sample = [];
+            const surnames = ["陳", "林", "黃", "張", "李", "王", "吳", "劉", "蔡", "楊"];
+            const names = ["品安", "冠廷", "語恩", "奕安", "欣妍", "柏凱", "晨宇", "沛璇", "子豪", "子恩"];
+            for (let i = 1; i <= 20; i++) {
+                const seat = String(i).padStart(2, '0');
+                const name = surnames[i % surnames.length] + names[i % names.length];
+                sample.push(`${seat} ${name}`);
+            }
+            document.getElementById('roster-textarea').value = sample.join('\n');
+        }
+
+        function saveRoster() {
+            const text = document.getElementById('roster-textarea').value.trim();
+            const lines = text.split('\n').filter(l => l.trim().length > 0);
+            
+            const newStudents = [];
+            lines.forEach((line, idx) => {
+                const parts = line.trim().split(/\s+/);
+                if (parts.length >= 2) {
+                    newStudents.push({
+                        id: idx + 1,
+                        seat: parts[0],
+                        name: parts.slice(1).join(' ')
+                    });
+                } else if (parts.length === 1) {
+                    newStudents.push({
+                        id: idx + 1,
+                        seat: String(idx + 1).padStart(2, '0'),
+                        name: parts[0]
+                    });
+                }
+            });
+
+            if (newStudents.length === 0) {
+                showToast("名冊格式不正確，請輸入座號與姓名", "error");
+                return;
+            }
+
+            students = newStudents;
+            closeModal('modal-roster');
+            renderStudentsGrid();
+            updateStats();
+            saveToCloud(); // 儲存名冊更新
+            showToast(`已成功載入 ${students.length} 位學生名冊並儲存`);
+        }
+
+        function openLineSummaryModal() {
+            const asg = getCurrentAssignment();
+            const dateStr = new Date().toLocaleDateString('zh-TW', { month: 'numeric', day: 'numeric' });
+
+            const missingList = [];
+            const correctingList = [];
+
+            students.forEach(s => {
+                const rec = asg.records[s.id] || { status: 'missing' };
+                if (rec.status === 'missing') {
+                    const reason = rec.reasons && rec.reasons.length > 0 ? `(${rec.reasons.join('/')})` : '';
+                    missingList.push(`${s.seat} ${s.name}${reason}`);
+                } else if (rec.status === 'correcting' || rec.status === 'rechecking') {
+                    const reason = rec.reasons && rec.reasons.length > 0 ? `(${rec.reasons.join('/')})` : '';
+                    correctingList.push(`${s.seat} ${s.name}${reason}`);
+                }
+            });
+
+            let text = `📢【作業催流通告】${dateStr}\n`;
+            text += `📌 項目：[${asg.subject}] ${asg.title}\n`;
+            if (asg.note) text += `💡 備註：${asg.note}\n`;
+            text += `--------------------------\n`;
+
+            text += `❌ 今日未繳交 (${missingList.length}人)：\n`;
+            text += missingList.length > 0 ? missingList.join('、 ') : `全班皆已繳交 🎉`;
+            text += `\n\n`;
+
+            text += `✏️ 待訂正 / 重改 (${correctingList.length}人)：\n`;
+            text += correctingList.length > 0 ? correctingList.join('、 ') : `無待訂正學生 👍`;
+            text += `\n\n`;
+
+            text += `請以上同學今日完成訂正與補交，感謝家長協助督促！`;
+
+            document.getElementById('line-output-text').value = text;
+            openModal('modal-line-summary');
+        }
+
+        function copyLineText() {
+            const textarea = document.getElementById('line-output-text');
+            textarea.select();
+            document.execCommand('copy');
+
+            const status = document.getElementById('copy-status');
+            status.classList.remove('opacity-0');
+            setTimeout(() => {
+                status.classList.add('opacity-0');
+            }, 2000);
+            showToast("文案已成功複製到剪貼簿！");
+        }
+
+        // 將函式掛載至 window 供 HTML 點擊觸發
+        window.switchAssignment = switchAssignment;
+        window.openRosterModal = openRosterModal;
+        window.openNewAssignmentModal = openNewAssignmentModal;
+        window.batchMarkAll = batchMarkAll;
+        window.openLineSummaryModal = openLineSummaryModal;
+        window.deleteCurrentAssignment = deleteCurrentAssignment;
+        window.filterStatus = filterStatus;
+        window.openStudentDetailModal = openStudentDetailModal;
+        window.closeModal = closeModal;
+        window.handleCreateAssignment = handleCreateAssignment;
+        window.saveStudentDetail = saveStudentDetail;
+        window.loadSampleRoster = loadSampleRoster;
+        window.saveRoster = saveRoster;
+        window.copyLineText = copyLineText;
+
+        window.onload = function() {
+            initApp();
+        };
+    </script>
+</body>
+</html>
