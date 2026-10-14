@@ -101,7 +101,6 @@
   </div>
 
   <script>
-    // 您的專屬 Firebase 金鑰設定
     const firebaseConfig = {
       apiKey: "AIzaSyDIsW7LOKp069tE5EyufP3YsuBQBqvm5lE",
       authDomain: "homework-tracker-f56a7.firebaseapp.com",
@@ -112,17 +111,6 @@
       appId: "1:52476086650:web:d4b5193729e172c9c36ec3",
       measurementId: "G-J4SKB9XXEC"
     };
-
-    // 初始化 Firebase
-    let db = null;
-    let dbRef = null;
-    try {
-      firebase.initializeApp(firebaseConfig);
-      db = firebase.database();
-      dbRef = db.ref('homework_tracker_data');
-    } catch (e) {
-      console.error("Firebase 初始化失敗，請檢查金鑰設定", e);
-    }
 
     const defaultData = {
       activeClassId: 'c1',
@@ -148,10 +136,11 @@
     };
 
     let state = defaultData;
-    let currentTaskId = null;
+    let currentTaskId = defaultData.classes[0].tasks[0].id;
 
     function updateSyncBadge(status) {
       const el = document.getElementById('cloudStatus');
+      if (!el) return;
       if (status === 'synced') {
         el.className = "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200";
         el.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> 雲端已同步';
@@ -160,17 +149,27 @@
         el.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></span> 同步中...';
       } else {
         el.className = "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-rose-50 text-rose-700 border border-rose-200";
-        el.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-rose-500"></span> 連線異常 (請檢查規則)';
+        el.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-rose-500"></span> 連線未通';
       }
     }
 
-    // 監聽雲端資料即時更新
-    if (dbRef) {
+    // 先行初次渲染畫面，避免卡在「載入中...」
+    render();
+
+    // 初始化 Firebase 並綁定
+    let db = null;
+    let dbRef = null;
+    try {
+      firebase.initializeApp(firebaseConfig);
+      db = firebase.database();
+      dbRef = db.ref('homework_tracker_data');
+
       dbRef.on('value', (snapshot) => {
         const val = snapshot.val();
         if (val && Array.isArray(val.classes)) {
           state = val;
         } else {
+          // 資料庫尚無根節點資料時，寫入預設值
           dbRef.set(defaultData);
           state = defaultData;
         }
@@ -181,9 +180,12 @@
         updateSyncBadge('synced');
         render();
       }, (error) => {
-        console.error(error);
+        console.error("Firebase 連線錯誤：", error);
         updateSyncBadge('error');
       });
+    } catch (e) {
+      console.error("Firebase 初始化失敗：", e);
+      updateSyncBadge('error');
     }
 
     function getCurrentClass() {
@@ -333,38 +335,110 @@
 
       // 1. 渲染組別標籤列
       const classTabsEl = document.getElementById('classTabs');
-      classTabsEl.innerHTML = '';
-      state.classes.forEach(c => {
-        const isActive = c.id === currentClass.id;
-        const btn = document.createElement('button');
-        btn.onclick = () => switchClass(c.id);
-        btn.className = `px-3.5 py-1.5 text-xs font-semibold rounded-xl border transition ${
-          isActive 
-            ? 'bg-blue-600 text-white border-blue-600 shadow-sm' 
-            : 'bg-slate-100 text-slate-600 border-transparent hover:bg-slate-200'
-        }`;
-        btn.textContent = c.name;
-        classTabsEl.appendChild(btn);
-      });
+      if (classTabsEl) {
+        classTabsEl.innerHTML = '';
+        state.classes.forEach(c => {
+          const isActive = c.id === currentClass.id;
+          const btn = document.createElement('button');
+          btn.onclick = () => switchClass(c.id);
+          btn.className = `px-3.5 py-1.5 text-xs font-semibold rounded-xl border transition ${
+            isActive 
+              ? 'bg-blue-600 text-white border-blue-600 shadow-sm' 
+              : 'bg-slate-100 text-slate-600 border-transparent hover:bg-slate-200'
+          }`;
+          btn.textContent = c.name;
+          classTabsEl.appendChild(btn);
+        });
+      }
 
       // 2. 渲染作業清單
       const taskListEl = document.getElementById('taskList');
-      taskListEl.innerHTML = '';
+      if (taskListEl) {
+        taskListEl.innerHTML = '';
+        if (!currentClass.tasks) currentClass.tasks = [];
+        if (!currentClass.tasks.find(t => t.id === currentTaskId) && currentClass.tasks.length > 0) {
+          currentTaskId = currentClass.tasks[0].id;
+        }
 
-      if (!currentClass.tasks) currentClass.tasks = [];
-      if (!currentClass.tasks.find(t => t.id === currentTaskId) && currentClass.tasks.length > 0) {
-        currentTaskId = currentClass.tasks[0].id;
+        currentClass.tasks.forEach(t => {
+          const isActive = t.id === currentTaskId;
+          const btn = document.createElement('button');
+          btn.onclick = () => selectTask(t.id);
+          btn.className = `px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 border transition ${
+            isActive 
+              ? 'bg-blue-600 text-white border-blue-600 shadow-sm' 
+              : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+          }`;
+          
+          let typeBadge = t.isExternal 
+            ? `<span class="px-1.5 py-0.2 text-[10px] rounded ${isActive ? 'bg-blue-700 text-blue-100' : 'bg-amber-100 text-amber-700'}">科任</span>`
+            : '';
+          btn.innerHTML = `${typeBadge} ${t.title}`;
+          taskListEl.appendChild(btn);
+        });
       }
 
-      currentClass.tasks.forEach(t => {
-        const isActive = t.id === currentTaskId;
-        const btn = document.createElement('button');
-        btn.onclick = () => selectTask(t.id);
-        btn.className = `px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 border transition ${
-          isActive 
-            ? 'bg-blue-600 text-white border-blue-600 shadow-sm' 
-            : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-        }`;
-        
-        let typeBadge = t.isExternal 
-          ? `<span class="px-1.5 py-0.2 text-[10px] rounded ${isActive ? 'bg-blue-700 text-blue-100' : 'bg-amber-100 text-amber-700'}">科任
+      // 3. 渲染學生狀態網格
+      const currentTask = currentClass.tasks.find(t => t.id === currentTaskId);
+      const studentGrid = document.getElementById('studentGrid');
+      if (!studentGrid) return;
+      studentGrid.innerHTML = '';
+
+      if (!currentTask) {
+        document.getElementById('currentTaskTitle').textContent = "尚未建立作業";
+        document.getElementById('currentTaskBadge').textContent = "";
+        document.getElementById('noticeText').value = "";
+        return;
+      }
+
+      document.getElementById('currentTaskTitle').textContent = currentTask.title;
+      const badge = document.getElementById('currentTaskBadge');
+      if (currentTask.isExternal) {
+        badge.textContent = "科任代催作業";
+        badge.className = "text-xs px-2 py-0.5 rounded-full font-medium bg-amber-50 text-amber-700 border border-amber-200";
+      } else {
+        badge.textContent = "授課作業";
+        badge.className = "text-xs px-2 py-0.5 rounded-full font-medium bg-blue-50 text-blue-700 border border-blue-200";
+      }
+
+      let missingList = [];
+      let correctingList = [];
+
+      currentClass.students.forEach(student => {
+        const records = currentTask.records || {};
+        const status = records[student.id] || 'done';
+        if (status === 'missing') missingList.push(student.name);
+        if (status === 'correcting') correctingList.push(student.name);
+
+        const card = document.createElement('button');
+        card.onclick = () => toggleStudent(student.id);
+
+        let colorClasses = "bg-emerald-50 border-emerald-200 text-emerald-800";
+        let statusLabel = "已完成";
+
+        if (status === 'missing') {
+          colorClasses = "bg-rose-50 border-rose-300 text-rose-800 ring-2 ring-rose-400";
+          statusLabel = "未繳交";
+        } else if (status === 'correcting') {
+          colorClasses = "bg-amber-50 border-amber-300 text-amber-800 ring-2 ring-amber-400";
+          statusLabel = "待訂正";
+        }
+
+        card.className = `p-3 rounded-xl border flex flex-col items-center justify-center transition active:scale-95 ${colorClasses}`;
+        card.innerHTML = `
+          <span class="text-sm font-bold truncate max-w-full">${student.name}</span>
+          <span class="text-[10px] mt-1 font-semibold opacity-80">${statusLabel}</span>
+        `;
+        studentGrid.appendChild(card);
+      });
+
+      // 4. 自動產生通知文案
+      let text = `【${currentClass.name} - ${currentTask.title}追蹤通知】\n`;
+      if (currentTask.isExternal) text += `※ 本項為科任老師委請提醒之作業\n`;
+      text += `● 未繳交：${missingList.length ? missingList.join('、') : '全數繳交'}\n`;
+      text += `● 待訂正：${correctingList.length ? correctingList.join('、') : '無'}`;
+      document.getElementById('noticeText').value = text;
+    }
+  </script>
+</body>
+</html>
