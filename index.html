@@ -87,10 +87,25 @@
       <div id="studentGrid" class="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-2.5 pt-2"></div>
     </section>
 
-    <!-- 通報文案區 -->
+    <!-- 每位學生未完成項目總清冊 -->
+    <section class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 space-y-4">
+      <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+        <div>
+          <h2 class="text-sm font-bold text-slate-800">學生個人待辦總清冊</h2>
+          <p class="text-xs text-slate-500 mt-0.5">跨所有追蹤作業，個別統整每位學生尚未完成的項目</p>
+        </div>
+        <button onclick="copyAllStudentsSummary()" class="text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg transition">
+          複製全班待辦名單
+        </button>
+      </div>
+
+      <div id="studentSummaryList" class="space-y-2.5"></div>
+    </section>
+
+    <!-- 單一作業通報文案區 -->
     <section class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 space-y-3">
       <div class="flex items-center justify-between">
-        <h2 class="text-sm font-bold text-slate-700">聯絡簿 / LINE 通知文字</h2>
+        <h2 class="text-sm font-bold text-slate-700">當前作業通報文案 (LINE / 聯絡簿)</h2>
         <button onclick="copyNotice()" class="text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 rounded-lg transition flex items-center gap-1">
           一鍵複製
         </button>
@@ -153,10 +168,8 @@
       }
     }
 
-    // 先行初次渲染畫面，避免卡在「載入中...」
     render();
 
-    // 初始化 Firebase 並綁定
     let db = null;
     let dbRef = null;
     try {
@@ -169,7 +182,6 @@
         if (val && Array.isArray(val.classes)) {
           state = val;
         } else {
-          // 資料庫尚無根節點資料時，寫入預設值
           dbRef.set(defaultData);
           state = defaultData;
         }
@@ -329,6 +341,44 @@
       });
     }
 
+    function copyIndividualNotice(studentName, itemsText) {
+      const currentClass = getCurrentClass();
+      const fullText = `【${currentClass.name}】${studentName} 今日作業待辦提醒：\n${itemsText}`;
+      navigator.clipboard.writeText(fullText).then(() => {
+        alert(`已複製 ${studentName} 的待辦提醒！`);
+      });
+    }
+
+    function copyAllStudentsSummary() {
+      const currentClass = getCurrentClass();
+      let summaryText = `【${currentClass.name} - 學生未完成作業總清單】\n`;
+      let hasAnyPending = false;
+
+      currentClass.students.forEach(student => {
+        let pending = [];
+        (currentClass.tasks || []).forEach(task => {
+          const status = (task.records || {})[student.id] || 'done';
+          if (status === 'missing') {
+            pending.push(`${task.title} (未交${task.isExternal ? '/科任' : ''})`);
+          } else if (status === 'correcting') {
+            pending.push(`${task.title} (待訂正${task.isExternal ? '/科任' : ''})`);
+          }
+        });
+        if (pending.length > 0) {
+          hasAnyPending = true;
+          summaryText += `● ${student.name}：${pending.join('、')}\n`;
+        }
+      });
+
+      if (!hasAnyPending) {
+        summaryText += "目前全班無任何未完成或待訂正作業，全員過關！";
+      }
+
+      navigator.clipboard.writeText(summaryText.trim()).then(() => {
+        alert("已複製全班學生待辦總清冊！");
+      });
+    }
+
     function render() {
       const currentClass = getCurrentClass();
       if (!currentClass) return;
@@ -371,74 +421,4 @@
           }`;
           
           let typeBadge = t.isExternal 
-            ? `<span class="px-1.5 py-0.2 text-[10px] rounded ${isActive ? 'bg-blue-700 text-blue-100' : 'bg-amber-100 text-amber-700'}">科任</span>`
-            : '';
-          btn.innerHTML = `${typeBadge} ${t.title}`;
-          taskListEl.appendChild(btn);
-        });
-      }
-
-      // 3. 渲染學生狀態網格
-      const currentTask = currentClass.tasks.find(t => t.id === currentTaskId);
-      const studentGrid = document.getElementById('studentGrid');
-      if (!studentGrid) return;
-      studentGrid.innerHTML = '';
-
-      if (!currentTask) {
-        document.getElementById('currentTaskTitle').textContent = "尚未建立作業";
-        document.getElementById('currentTaskBadge').textContent = "";
-        document.getElementById('noticeText').value = "";
-        return;
-      }
-
-      document.getElementById('currentTaskTitle').textContent = currentTask.title;
-      const badge = document.getElementById('currentTaskBadge');
-      if (currentTask.isExternal) {
-        badge.textContent = "科任代催作業";
-        badge.className = "text-xs px-2 py-0.5 rounded-full font-medium bg-amber-50 text-amber-700 border border-amber-200";
-      } else {
-        badge.textContent = "授課作業";
-        badge.className = "text-xs px-2 py-0.5 rounded-full font-medium bg-blue-50 text-blue-700 border border-blue-200";
-      }
-
-      let missingList = [];
-      let correctingList = [];
-
-      currentClass.students.forEach(student => {
-        const records = currentTask.records || {};
-        const status = records[student.id] || 'done';
-        if (status === 'missing') missingList.push(student.name);
-        if (status === 'correcting') correctingList.push(student.name);
-
-        const card = document.createElement('button');
-        card.onclick = () => toggleStudent(student.id);
-
-        let colorClasses = "bg-emerald-50 border-emerald-200 text-emerald-800";
-        let statusLabel = "已完成";
-
-        if (status === 'missing') {
-          colorClasses = "bg-rose-50 border-rose-300 text-rose-800 ring-2 ring-rose-400";
-          statusLabel = "未繳交";
-        } else if (status === 'correcting') {
-          colorClasses = "bg-amber-50 border-amber-300 text-amber-800 ring-2 ring-amber-400";
-          statusLabel = "待訂正";
-        }
-
-        card.className = `p-3 rounded-xl border flex flex-col items-center justify-center transition active:scale-95 ${colorClasses}`;
-        card.innerHTML = `
-          <span class="text-sm font-bold truncate max-w-full">${student.name}</span>
-          <span class="text-[10px] mt-1 font-semibold opacity-80">${statusLabel}</span>
-        `;
-        studentGrid.appendChild(card);
-      });
-
-      // 4. 自動產生通知文案
-      let text = `【${currentClass.name} - ${currentTask.title}追蹤通知】\n`;
-      if (currentTask.isExternal) text += `※ 本項為科任老師委請提醒之作業\n`;
-      text += `● 未繳交：${missingList.length ? missingList.join('、') : '全數繳交'}\n`;
-      text += `● 待訂正：${correctingList.length ? correctingList.join('、') : '無'}`;
-      document.getElementById('noticeText').value = text;
-    }
-  </script>
-</body>
-</html>
+            ? `<span class="px-1.5 py-0.2 text-[10px] rounded ${isActive ? 'bg-blue-700 text-blue-100' : 'bg-amber-100 text-
