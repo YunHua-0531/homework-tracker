@@ -15,9 +15,12 @@
         <div>
           <div class="flex items-center gap-2">
             <h1 class="text-xl font-bold text-slate-900 tracking-tight">作業與訂正追蹤簿</h1>
-            <span id="cloudStatus" class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-50 text-amber-700 border border-amber-200">
-              <span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span> 雲端連線中...
+            <span id="cloudStatus" class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
+              <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> 本地即時可用
             </span>
+            <button onclick="manualSync()" class="text-[11px] text-slate-400 hover:text-blue-600 underline">
+              重新整理雲端
+            </button>
           </div>
           <p class="text-xs text-slate-500 mt-0.5">Firebase 雲端自動同步 • 跨裝置即時更新</p>
         </div>
@@ -104,12 +107,9 @@
           <thead class="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200">
             <tr id="matrixHeaderRow">
               <th class="py-3 px-3 min-w-[95px] bg-slate-50 sticky left-0 z-10 border-r border-slate-200">學生姓名</th>
-              <!-- 動態填入各項作業表頭 -->
             </tr>
           </thead>
-          <tbody id="matrixTableBody" class="divide-y divide-slate-100 bg-white">
-            <!-- 動態填入學生各項作業狀態欄 -->
-          </tbody>
+          <tbody id="matrixTableBody" class="divide-y divide-slate-100 bg-white"></tbody>
         </table>
       </div>
     </section>
@@ -119,12 +119,9 @@
       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div class="flex flex-wrap items-center gap-3">
           <h2 class="text-sm font-bold text-slate-800">學生個人作業提醒文案 (LINE / 聯絡簿)</h2>
-          <!-- 選擇欲通報的學生 -->
           <div class="flex items-center gap-1.5">
             <label for="studentSelect" class="text-xs text-slate-500 font-medium">選擇學生：</label>
-            <select id="studentSelect" onchange="onStudentSelectChange()" class="text-xs font-semibold text-slate-700 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer">
-              <!-- 動態填入學生選項 -->
-            </select>
+            <select id="studentSelect" onchange="onStudentSelectChange()" class="text-xs font-semibold text-slate-700 bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-1 focus:ring-blue-500 cursor-pointer"></select>
           </div>
         </div>
 
@@ -166,28 +163,29 @@
 
     let state = JSON.parse(localStorage.getItem('HW_LOCAL_CACHE')) || defaultData;
     let currentTaskId = state.classes[0]?.tasks[0]?.id || null;
-    let selectedStudentId = null; // 當前在文案區選取的學生
+    let selectedStudentId = null;
 
     function updateSyncBadge(status) {
       const el = document.getElementById('cloudStatus');
       if (!el) return;
       if (status === 'synced') {
-        el.className = "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200";
+        el.className = "inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200";
         el.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> 雲端已同步';
       } else if (status === 'syncing') {
-        el.className = "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-blue-50 text-blue-700 border border-blue-200";
+        el.className = "inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-blue-50 text-blue-700 border border-blue-200";
         el.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></span> 同步中...';
       } else {
-        el.className = "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-rose-50 text-rose-700 border border-rose-200";
-        el.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-rose-500"></span> 連線未通';
+        el.className = "inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200";
+        el.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> 本地即時可用';
       }
     }
 
+    // 啟動立即渲染，絕不卡「載入中」
     render();
 
     async function fetchCloudData() {
       try {
-        const response = await fetch(DB_ENDPOINT);
+        const response = await fetch(DB_ENDPOINT, { cache: 'no-store' });
         if (!response.ok) throw new Error("Fetch failed");
         const val = await response.json();
         if (val && Array.isArray(val.classes)) {
@@ -203,238 +201,4 @@
         updateSyncBadge('synced');
         render();
       } catch (err) {
-        console.warn("雲端讀取異常：", err);
-        updateSyncBadge('error');
-      }
-    }
-
-    async function pushCloudData(dataToSave) {
-      updateSyncBadge('syncing');
-      try {
-        const res = await fetch(DB_ENDPOINT, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(dataToSave)
-        });
-        if (res.ok) {
-          updateSyncBadge('synced');
-        } else {
-          updateSyncBadge('error');
-        }
-      } catch (e) {
-        console.error("雲端寫入失敗：", e);
-        updateSyncBadge('error');
-      }
-    }
-
-    fetchCloudData();
-    setInterval(fetchCloudData, 10000);
-
-    function getCurrentClass() {
-      return state.classes.find(c => c.id === state.activeClassId) || state.classes[0];
-    }
-
-    function saveState() {
-      localStorage.setItem('HW_LOCAL_CACHE', JSON.stringify(state));
-      pushCloudData(state);
-      render();
-    }
-
-    function switchClass(classId) {
-      state.activeClassId = classId;
-      const currentClass = getCurrentClass();
-      currentTaskId = currentClass?.tasks[0]?.id || null;
-      selectedStudentId = null; // 切換組別時重設選擇的學生
-      saveState();
-    }
-
-    function renameCurrentClass() {
-      const currentClass = getCurrentClass();
-      if (!currentClass) return;
-      const newName = prompt("請輸入新的組別/班級名稱：", currentClass.name);
-      if (newName && newName.trim()) {
-        currentClass.name = newName.trim();
-        saveState();
-      }
-    }
-
-    function addClassPrompt() {
-      const name = prompt("請輸入新組別/班級名稱：");
-      if (!name || !name.trim()) return;
-      const newId = 'c_' + Date.now();
-      state.classes.push({
-        id: newId,
-        name: name.trim(),
-        students: Array.from({ length: 15 }, (_, i) => ({ id: i + 1, name: `${i + 1}號` })),
-        tasks: [
-          { id: 't_' + Date.now(), title: '第一份作業', isExternal: false, records: {} }
-        ]
-      });
-      state.activeClassId = newId;
-      currentTaskId = state.classes[state.classes.length - 1].tasks[0].id;
-      selectedStudentId = null;
-      saveState();
-    }
-
-    function deleteCurrentClass() {
-      if (state.classes.length <= 1) {
-        alert("至少需要保留一個組別！");
-        return;
-      }
-      const currentClass = getCurrentClass();
-      if (confirm(`確定要刪除「${currentClass.name}」嗎？裡面的所有作業與名冊都會被移除。`)) {
-        state.classes = state.classes.filter(c => c.id !== currentClass.id);
-        state.activeClassId = state.classes[0].id;
-        currentTaskId = state.classes[0].tasks[0]?.id || null;
-        selectedStudentId = null;
-        saveState();
-      }
-    }
-
-    function selectTask(taskId) {
-      currentTaskId = taskId;
-      render();
-    }
-
-    function toggleStudentSpecificTask(studentId, taskId) {
-      const currentClass = getCurrentClass();
-      const task = currentClass.tasks.find(t => t.id === taskId);
-      if (!task) return;
-
-      if (!task.records) task.records = {};
-      const currentStatus = task.records[studentId] || 'done';
-      let nextStatus = 'missing';
-      if (currentStatus === 'missing') nextStatus = 'correcting';
-      else if (currentStatus === 'correcting') nextStatus = 'done';
-      
-      task.records[studentId] = nextStatus;
-      saveState();
-    }
-
-    function toggleStudent(studentId) {
-      toggleStudentSpecificTask(studentId, currentTaskId);
-    }
-
-    function markAll(status) {
-      const currentClass = getCurrentClass();
-      const task = currentClass.tasks.find(t => t.id === currentTaskId);
-      if (!task) return;
-      if (!task.records) task.records = {};
-      currentClass.students.forEach(s => {
-        task.records[s.id] = status;
-      });
-      saveState();
-    }
-
-    function promptNewTask() {
-      const title = prompt("請輸入作業名稱（例如：數習 p.30-32）：");
-      if (!title || !title.trim()) return;
-      const isExternal = confirm("此項是【代催的科任/外聘作業】嗎？\n[確定] 是科任作業  |  [取消] 本人授課作業");
-      const newId = 't_' + Date.now();
-      const currentClass = getCurrentClass();
-      if (!currentClass.tasks) currentClass.tasks = [];
-      currentClass.tasks.push({
-        id: newId,
-        title: title.trim(),
-        isExternal: isExternal,
-        records: {}
-      });
-      currentTaskId = newId;
-      saveState();
-    }
-
-    function deleteCurrentTask() {
-      const currentClass = getCurrentClass();
-      const task = currentClass.tasks.find(t => t.id === currentTaskId);
-      if (!task) return;
-      if (confirm(`確定要刪除「${task.title}」這項作業嗎？`)) {
-        currentClass.tasks = currentClass.tasks.filter(t => t.id !== currentTaskId);
-        currentTaskId = currentClass.tasks[0]?.id || null;
-        saveState();
-      }
-    }
-
-    function editRosterPrompt() {
-      const currentClass = getCurrentClass();
-      const currentList = currentClass.students.map(s => s.name).join('、');
-      const input = prompt(`請輸入「${currentClass.name}」的學生名冊（以逗號或頓號分隔）：`, currentList);
-      if (!input) return;
-      const names = input.split(/[,、，\s]+/).filter(Boolean);
-      currentClass.students = names.map((name, idx) => ({ id: idx + 1, name: name }));
-      selectedStudentId = null;
-      saveState();
-    }
-
-    // 當下拉選單切換學生時
-    function onStudentSelectChange() {
-      const select = document.getElementById('studentSelect');
-      selectedStudentId = Number(select.value);
-      updateIndividualNotice();
-    }
-
-    // 點擊表格旁的文案捷徑
-    function selectAndFocusStudent(studentId) {
-      selectedStudentId = studentId;
-      render();
-      const section = document.getElementById('noticeSection');
-      if (section) {
-        section.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-      }
-    }
-
-    function updateIndividualNotice() {
-      const currentClass = getCurrentClass();
-      if (!currentClass) return;
-
-      const student = currentClass.students.find(s => s.id === selectedStudentId);
-      const textarea = document.getElementById('noticeText');
-      if (!student) {
-        textarea.value = "尚未選取學生。";
-        return;
-      }
-
-      const tasks = currentClass.tasks || [];
-      let missingTasks = [];
-      let correctingTasks = [];
-
-      tasks.forEach(task => {
-        const status = (task.records || {})[student.id] || 'done';
-        if (status === 'missing') {
-          missingTasks.push(`${task.title}${task.isExternal ? ' (科任)' : ''}`);
-        } else if (status === 'correcting') {
-          correctingTasks.push(`${task.title}${task.isExternal ? ' (科任)' : ''}`);
-        }
-      });
-
-      let text = `家長您好，以下是【${student.name}】今日作業狀況提醒：\n`;
-
-      if (missingTasks.length === 0 && correctingTasks.length === 0) {
-        text += `✨ 今日各項作業均已完成過關，表現非常棒，請家長給予鼓勵！`;
-      } else {
-        if (missingTasks.length > 0) {
-          text += `❌ 尚未繳交作業：\n  • ${missingTasks.join('\n  • ')}\n`;
-        }
-        if (correctingTasks.length > 0) {
-          text += `✏️ 待訂正作業：\n  • ${correctingTasks.join('\n  • ')}\n`;
-        }
-        text += `請家長撥空提醒孩子今日完成補繳或訂正，謝謝您的配合！`;
-      }
-
-      textarea.value = text;
-    }
-
-    function copyNotice() {
-      const textarea = document.getElementById('noticeText');
-      navigator.clipboard.writeText(textarea.value).then(() => {
-        alert("已成功複製該生通報文字！");
-      });
-    }
-
-    function copyAllStudentsSummary() {
-      const currentClass = getCurrentClass();
-      let summaryText = `【${currentClass.name} - 學生未完成作業總清單】\n`;
-      let hasAnyPending = false;
-
-      currentClass.students.forEach(student => {
-        let pending = [];
-        (currentClass.tasks ||
+        console.warn("雲端讀取異常（使用
