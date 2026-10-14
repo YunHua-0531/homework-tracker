@@ -7,7 +7,7 @@
   <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-slate-50 text-slate-800 min-h-screen p-4 md:p-8 font-sans">
-  <div class="max-w-4xl mx-auto space-y-6">
+  <div class="max-w-5xl mx-auto space-y-6">
     
     <!-- 頂端同步狀態條與組別列 -->
     <header class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 space-y-3">
@@ -73,7 +73,7 @@
         </div>
       </div>
 
-      <!-- 狀態圖例 -->
+      <!-- 狀態說明圖例 -->
       <div class="flex gap-4 text-xs text-slate-500">
         <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-emerald-500 inline-block"></span> 點擊切換：已完成</span>
         <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-rose-500 inline-block"></span> 未繳交</span>
@@ -84,19 +84,34 @@
       <div id="studentGrid" class="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-2.5 pt-2"></div>
     </section>
 
-    <!-- 每位學生未完成項目總清冊 -->
+    <!-- 學生待辦總清冊 (表格化結構) -->
     <section class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 space-y-4">
-      <div class="flex items-center justify-between border-b border-slate-100 pb-3">
+      <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
         <div>
-          <h2 class="text-sm font-bold text-slate-800">學生個人待辦總清冊</h2>
-          <p class="text-xs text-slate-500 mt-0.5">跨所有追蹤作業，個別統整每位學生尚未完成的項目</p>
+          <h2 class="text-sm font-bold text-slate-800">全班作業與訂正總清冊（矩陣表格）</h2>
+          <p class="text-xs text-slate-500 mt-0.5">點擊表格內任意儲存格即可直接切換狀態</p>
         </div>
-        <button onclick="copyAllStudentsSummary()" class="text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg transition">
-          複製全班待辦名單
-        </button>
+        <div class="flex items-center gap-2">
+          <button onclick="copyAllStudentsSummary()" class="text-xs font-semibold bg-slate-100 hover:bg-slate-200 text-slate-700 px-3 py-1.5 rounded-lg transition">
+            📋 複製全班未完成名單
+          </button>
+        </div>
       </div>
 
-      <div id="studentSummaryList" class="space-y-2.5"></div>
+      <!-- 響應式滾動表格容器 -->
+      <div class="overflow-x-auto border border-slate-200 rounded-xl">
+        <table class="w-full text-xs text-left text-slate-600 border-collapse" id="matrixTable">
+          <thead class="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200">
+            <tr id="matrixHeaderRow">
+              <th class="py-3 px-3 min-w-[70px] bg-slate-50 sticky left-0 z-10 border-r border-slate-200">學生</th>
+              <!-- 動態填入各項作業表頭 -->
+            </tr>
+          </thead>
+          <tbody id="matrixTableBody" class="divide-y divide-slate-100 bg-white">
+            <!-- 動態填入學生各項作業狀態欄 -->
+          </tbody>
+        </table>
+      </div>
     </section>
 
     <!-- 單一作業通報文案區 -->
@@ -113,7 +128,6 @@
   </div>
 
   <script>
-    // 專屬 Firebase 即時端點
     const DB_ENDPOINT = "https://homework-tracker-f56a7-default-rtdb.firebaseio.com/homework_tracker_data.json";
 
     const defaultData = {
@@ -139,7 +153,6 @@
       ]
     };
 
-    // 優先讀取本機快取以求毫秒級啟動
     let state = JSON.parse(localStorage.getItem('HW_LOCAL_CACHE')) || defaultData;
     let currentTaskId = state.classes[0]?.tasks[0]?.id || null;
 
@@ -158,10 +171,8 @@
       }
     }
 
-    // 立即繪製初始畫面
     render();
 
-    // 透過 REST API 從雲端抓取最新資料
     async function fetchCloudData() {
       try {
         const response = await fetch(DB_ENDPOINT);
@@ -171,7 +182,6 @@
           state = val;
           localStorage.setItem('HW_LOCAL_CACHE', JSON.stringify(state));
         } else {
-          // 雲端若為空，初次自動寫入預設資料
           await pushCloudData(defaultData);
         }
         const currentClass = getCurrentClass();
@@ -186,7 +196,6 @@
       }
     }
 
-    // 透過 REST API 推送更新到雲端
     async function pushCloudData(dataToSave) {
       updateSyncBadge('syncing');
       try {
@@ -206,9 +215,8 @@
       }
     }
 
-    // 啟動雲端抓取與背景自動輪詢同步
     fetchCloudData();
-    setInterval(fetchCloudData, 10000); // 每 10 秒自動同步最新進度
+    setInterval(fetchCloudData, 10000);
 
     function getCurrentClass() {
       return state.classes.find(c => c.id === state.activeClassId) || state.classes[0];
@@ -273,9 +281,9 @@
       render();
     }
 
-    function toggleStudent(studentId) {
+    function toggleStudentSpecificTask(studentId, taskId) {
       const currentClass = getCurrentClass();
-      const task = currentClass.tasks.find(t => t.id === currentTaskId);
+      const task = currentClass.tasks.find(t => t.id === taskId);
       if (!task) return;
 
       if (!task.records) task.records = {};
@@ -286,6 +294,10 @@
       
       task.records[studentId] = nextStatus;
       saveState();
+    }
+
+    function toggleStudent(studentId) {
+      toggleStudentSpecificTask(studentId, currentTaskId);
     }
 
     function markAll(status) {
@@ -341,14 +353,6 @@
       const textarea = document.getElementById('noticeText');
       navigator.clipboard.writeText(textarea.value).then(() => {
         alert("已成功複製通報文字！");
-      });
-    }
-
-    function copyIndividualNotice(studentName, itemsText) {
-      const currentClass = getCurrentClass();
-      const fullText = `【${currentClass.name}】${studentName} 今日作業待辦提醒：\n${itemsText}`;
-      navigator.clipboard.writeText(fullText).then(() => {
-        alert(`已複製 ${studentName} 的待辦提醒！`);
       });
     }
 
@@ -431,7 +435,7 @@
         });
       }
 
-      // 3. 渲染學生狀態網格
+      // 3. 渲染學生狀態網格 (單項作業快速點選)
       const currentTask = currentClass.tasks.find(t => t.id === currentTaskId);
       const studentGrid = document.getElementById('studentGrid');
       if (studentGrid) {
@@ -492,59 +496,84 @@
         }
       }
 
-      // 4. 渲染學生個人待辦總清冊
-      const studentSummaryList = document.getElementById('studentSummaryList');
-      if (studentSummaryList) {
-        studentSummaryList.innerHTML = '';
-        let pendingStudentCount = 0;
+      // 4. 渲染結構化矩陣總清冊表格
+      const matrixHeaderRow = document.getElementById('matrixHeaderRow');
+      const matrixTableBody = document.getElementById('matrixTableBody');
 
-        currentClass.students.forEach(student => {
-          let studentPendingItems = [];
-          let plainTextPending = [];
-
-          (currentClass.tasks || []).forEach(task => {
-            const status = (task.records || {})[student.id] || 'done';
-            if (status === 'missing') {
-              const tag = task.isExternal ? '<span class="text-[10px] text-amber-600 bg-amber-50 px-1 py-0.5 rounded border border-amber-200 ml-1">科任</span>' : '';
-              studentPendingItems.push(`<span class="inline-flex items-center text-xs bg-rose-50 text-rose-700 border border-rose-200 px-2 py-0.5 rounded-md font-medium">❌ ${task.title}${tag} (未交)</span>`);
-              plainTextPending.push(`• ${task.title}【未繳交${task.isExternal ? ' - 科任' : ''}】`);
-            } else if (status === 'correcting') {
-              const tag = task.isExternal ? '<span class="text-[10px] text-amber-600 bg-amber-50 px-1 py-0.5 rounded border border-amber-200 ml-1">科任</span>' : '';
-              studentPendingItems.push(`<span class="inline-flex items-center text-xs bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded-md font-medium">✏️ ${task.title}${tag} (待訂正)</span>`);
-              plainTextPending.push(`• ${task.title}【待訂正${task.isExternal ? ' - 科任' : ''}】`);
-            }
-          });
-
-          if (studentPendingItems.length > 0) {
-            pendingStudentCount++;
-            const row = document.createElement('div');
-            row.className = "flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 bg-slate-50 border border-slate-200/80 rounded-xl hover:bg-slate-100/60 transition";
-            
-            const rawCopyString = plainTextPending.join('\n');
-            row.innerHTML = `
-              <div class="flex flex-wrap items-center gap-2">
-                <span class="text-xs font-bold text-slate-800 bg-white px-2 py-1 rounded-lg border border-slate-200 min-w-[50px] text-center shadow-xs">
-                  ${student.name}
-                </span>
-                <div class="flex flex-wrap gap-1.5">
-                  ${studentPendingItems.join('')}
-                </div>
-              </div>
-              <button onclick="copyIndividualNotice('${student.name}', \`${rawCopyString}\`)" class="self-end sm:self-auto text-[11px] text-slate-500 hover:text-blue-600 bg-white hover:bg-blue-50 border border-slate-200 px-2 py-1 rounded-lg transition shrink-0">
-                複製此生提醒
-              </button>
-            `;
-            studentSummaryList.appendChild(row);
-          }
+      if (matrixHeaderRow && matrixTableBody) {
+        // 重建表頭
+        matrixHeaderRow.innerHTML = `<th class="py-2.5 px-3 min-w-[75px] bg-slate-50 sticky left-0 z-10 border-r border-slate-200 text-slate-800">學生姓名</th>`;
+        
+        const tasks = currentClass.tasks || [];
+        tasks.forEach(task => {
+          const th = document.createElement('th');
+          th.className = "py-2.5 px-3 text-center min-w-[110px] border-r border-slate-200";
+          const extTag = task.isExternal ? '<span class="inline-block text-[10px] bg-amber-100 text-amber-700 px-1 py-0.2 rounded ml-1 font-normal">科</span>' : '';
+          th.innerHTML = `<div class="truncate max-w-[130px] mx-auto font-medium text-slate-700" title="${task.title}">${task.title}${extTag}</div>`;
+          matrixHeaderRow.appendChild(th);
         });
 
-        if (pendingStudentCount === 0) {
-          studentSummaryList.innerHTML = `
-            <div class="p-6 text-center bg-emerald-50/60 border border-emerald-100 rounded-xl text-emerald-700 text-xs font-medium">
-              🎉 太棒了！${currentClass.name} 所有學生目前各項作業皆已完成，沒有任何未交或待訂正項目！
-            </div>
+        // 加總待辦欄
+        const thSummary = document.createElement('th');
+        thSummary.className = "py-2.5 px-3 text-center min-w-[85px] bg-slate-100/60 text-slate-700";
+        thSummary.textContent = "待辦項數";
+        matrixHeaderRow.appendChild(thSummary);
+
+        // 重建表格主體內容
+        matrixTableBody.innerHTML = '';
+
+        currentClass.students.forEach(student => {
+          const tr = document.createElement('tr');
+          tr.className = "hover:bg-slate-50/80 transition-colors";
+
+          // 首欄：座號姓名
+          let rowHtml = `
+            <td class="py-2.5 px-3 font-semibold text-slate-800 bg-white sticky left-0 z-10 border-r border-slate-200 whitespace-nowrap shadow-xs">
+              ${student.name}
+            </td>
           `;
-        }
+
+          let studentPendingCount = 0;
+
+          // 各作業儲存格
+          tasks.forEach(task => {
+            const status = (task.records || {})[student.id] || 'done';
+            let cellContent = '';
+
+            if (status === 'missing') {
+              studentPendingCount++;
+              cellContent = `<span class="inline-flex items-center gap-0.5 px-2 py-0.5 rounded text-[11px] font-bold bg-rose-50 text-rose-600 border border-rose-200">❌ 未交</span>`;
+            } else if (status === 'correcting') {
+              studentPendingCount++;
+              cellContent = `<span class="inline-flex items-center gap-0.5 px-2 py-0.5 rounded text-[11px] font-bold bg-amber-50 text-amber-600 border border-amber-200">✏️ 待訂</span>`;
+            } else {
+              cellContent = `<span class="text-slate-300 font-bold">—</span>`;
+            }
+
+            rowHtml += `
+              <td onclick="toggleStudentSpecificTask(${student.id}, '${task.id}')" class="py-2 px-2 text-center border-r border-slate-100 cursor-pointer select-none hover:bg-slate-100/60 active:scale-95 transition">
+                ${cellContent}
+              </td>
+            `;
+          });
+
+          // 待辦加總欄
+          let countBadge = '';
+          if (studentPendingCount > 0) {
+            countBadge = `<span class="inline-block px-2 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-700">${studentPendingCount} 項</span>`;
+          } else {
+            countBadge = `<span class="text-emerald-600 font-medium text-xs">✓ 過關</span>`;
+          }
+
+          rowHtml += `
+            <td class="py-2.5 px-3 text-center bg-slate-50/40 whitespace-nowrap">
+              ${countBadge}
+            </td>
+          `;
+
+          tr.innerHTML = rowHtml;
+          matrixTableBody.appendChild(tr);
+        });
       }
     }
   </script>
