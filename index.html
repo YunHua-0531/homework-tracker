@@ -16,19 +16,19 @@
           <div class="flex items-center gap-2">
             <h1 class="text-xl font-bold text-slate-900 tracking-tight">作業與訂正追蹤簿</h1>
             <span id="cloudStatus" class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
-              <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> 本地即時可用
+              <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> 運作正常
             </span>
-            <button onclick="manualSync()" class="text-[11px] text-slate-400 hover:text-blue-600 underline">
-              重新整理雲端
-            </button>
           </div>
           <p class="text-xs text-slate-500 mt-0.5">Firebase 雲端自動同步 • 跨裝置即時更新</p>
         </div>
         
         <!-- 管理按鈕 -->
-        <div class="flex items-center gap-2">
+        <div class="flex flex-wrap items-center gap-2">
+          <button onclick="restoreDefaultData()" class="text-xs bg-slate-100 hover:bg-slate-200 text-slate-600 px-2.5 py-1.5 rounded-lg transition" title="若資料空白可點此還原示範名冊">
+            🔄 載入示範資料
+          </button>
           <button onclick="renameCurrentClass()" class="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 px-2.5 py-1.5 rounded-lg transition">
-            ✏️ 重新命名當前組別
+            ✏️ 重新命名組別
           </button>
           <button onclick="addClassPrompt()" class="text-xs bg-blue-50 hover:bg-blue-100 text-blue-600 font-semibold px-2.5 py-1.5 rounded-lg transition">
             + 新增組別
@@ -136,8 +136,9 @@
   </div>
 
   <script>
-    const DB_ENDPOINT = "https://homework-tracker-f56a7-default-rtdb.firebaseio.com/homework_tracker_data.json";
+    const DB_ENDPOINT = "https://homework-tracker-f56a7-default-rtdb.firebaseio.com/tracker.json";
 
+    // 基礎範本資料
     const defaultData = {
       activeClassId: 'c1',
       classes: [
@@ -161,7 +162,24 @@
       ]
     };
 
-    let state = JSON.parse(localStorage.getItem('HW_LOCAL_CACHE')) || defaultData;
+    // 初始化狀態：若本機快取無效，保證一定載入 defaultData
+    let state = null;
+    try {
+      const cached = localStorage.getItem('HW_TRACKER_STORE_V2');
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (parsed && Array.isArray(parsed.classes) && parsed.classes.length > 0) {
+          state = parsed;
+        }
+      }
+    } catch (e) {
+      console.warn("快取讀取異常：", e);
+    }
+
+    if (!state) {
+      state = JSON.parse(JSON.stringify(defaultData));
+    }
+
     let currentTaskId = state.classes[0]?.tasks[0]?.id || null;
     let selectedStudentId = null;
 
@@ -176,29 +194,516 @@
         el.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></span> 同步中...';
       } else {
         el.className = "inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200";
-        el.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> 本地即時可用';
+        el.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> 本地運作中';
       }
     }
 
-    // 啟動立即渲染，絕不卡「載入中」
+    // 立即繪製畫面，保證不留白
     render();
 
+    // 雲端讀取
     async function fetchCloudData() {
       try {
-        const response = await fetch(DB_ENDPOINT, { cache: 'no-store' });
-        if (!response.ok) throw new Error("Fetch failed");
-        const val = await response.json();
-        if (val && Array.isArray(val.classes)) {
-          state = val;
-          localStorage.setItem('HW_LOCAL_CACHE', JSON.stringify(state));
-        } else {
-          await pushCloudData(defaultData);
+        const response = await fetch(DB_ENDPOINT + '?auth=none', { cache: 'no-store' });
+        if (response.ok) {
+          const val = await response.json();
+          if (val && Array.isArray(val.classes) && val.classes.length > 0) {
+            state = val;
+            localStorage.setItem('HW_TRACKER_STORE_V2', JSON.stringify(state));
+            const currentClass = getCurrentClass();
+            if (!currentClass.tasks.find(t => t.id === currentTaskId)) {
+              currentTaskId = currentClass.tasks[0]?.id || null;
+            }
+            updateSyncBadge('synced');
+            render();
+            return;
+          }
         }
-        const currentClass = getCurrentClass();
-        if (!currentClass.tasks.find(t => t.id === currentTaskId)) {
-          currentTaskId = currentClass.tasks[0]?.id || null;
-        }
-        updateSyncBadge('synced');
-        render();
+        // 若雲端為空，自動推送當前資料建立結構
+        pushCloudData(state);
       } catch (err) {
-        console.warn("雲端讀取異常（使用
+        console.warn("雲端讀取暫時使用本機快取：", err);
+        updateSyncBadge('local');
+      }
+    }
+
+    // 雲端寫入
+    async function pushCloudData(dataToSave) {
+      updateSyncBadge('syncing');
+      try {
+        const res = await fetch(DB_ENDPOINT, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(dataToSave)
+        });
+        if (res.ok) {
+          updateSyncBadge('synced');
+        } else {
+          updateSyncBadge('local');
+        }
+      } catch (e) {
+        updateSyncBadge('local');
+      }
+    }
+
+    // 啟動連線
+    fetchCloudData();
+    setInterval(fetchCloudData, 12000);
+
+    function restoreDefaultData() {
+      if (confirm("確定要載入示範名單與作業嗎？這將覆蓋目前畫面。")) {
+        state = JSON.parse(JSON.stringify(defaultData));
+        currentTaskId = state.classes[0].tasks[0].id;
+        selectedStudentId = null;
+        saveState();
+      }
+    }
+
+    function getCurrentClass() {
+      return state.classes.find(c => c.id === state.activeClassId) || state.classes[0];
+    }
+
+    function saveState() {
+      localStorage.setItem('HW_TRACKER_STORE_V2', JSON.stringify(state));
+      pushCloudData(state);
+      render();
+    }
+
+    function switchClass(classId) {
+      state.activeClassId = classId;
+      const currentClass = getCurrentClass();
+      currentTaskId = currentClass?.tasks[0]?.id || null;
+      selectedStudentId = null;
+      saveState();
+    }
+
+    function renameCurrentClass() {
+      const currentClass = getCurrentClass();
+      if (!currentClass) return;
+      const newName = prompt("請輸入新的組別/班級名稱：", currentClass.name);
+      if (newName && newName.trim()) {
+        currentClass.name = newName.trim();
+        saveState();
+      }
+    }
+
+    function addClassPrompt() {
+      const name = prompt("請輸入新組別/班級名稱：");
+      if (!name || !name.trim()) return;
+      const newId = 'c_' + Date.now();
+      state.classes.push({
+        id: newId,
+        name: name.trim(),
+        students: Array.from({ length: 15 }, (_, i) => ({ id: i + 1, name: `${i + 1}號` })),
+        tasks: [
+          { id: 't_' + Date.now(), title: '第一份作業', isExternal: false, records: {} }
+        ]
+      });
+      state.activeClassId = newId;
+      currentTaskId = state.classes[state.classes.length - 1].tasks[0].id;
+      selectedStudentId = null;
+      saveState();
+    }
+
+    function deleteCurrentClass() {
+      if (state.classes.length <= 1) {
+        alert("至少需要保留一個組別！");
+        return;
+      }
+      const currentClass = getCurrentClass();
+      if (confirm(`確定要刪除「${currentClass.name}」嗎？裡面的所有作業與名冊都會被移除。`)) {
+        state.classes = state.classes.filter(c => c.id !== currentClass.id);
+        state.activeClassId = state.classes[0].id;
+        currentTaskId = state.classes[0].tasks[0]?.id || null;
+        selectedStudentId = null;
+        saveState();
+      }
+    }
+
+    function selectTask(taskId) {
+      currentTaskId = taskId;
+      render();
+    }
+
+    function toggleStudentSpecificTask(studentId, taskId) {
+      const currentClass = getCurrentClass();
+      const task = currentClass.tasks.find(t => t.id === taskId);
+      if (!task) return;
+
+      if (!task.records) task.records = {};
+      const currentStatus = task.records[studentId] || 'done';
+      let nextStatus = 'missing';
+      if (currentStatus === 'missing') nextStatus = 'correcting';
+      else if (currentStatus === 'correcting') nextStatus = 'done';
+      
+      task.records[studentId] = nextStatus;
+      saveState();
+    }
+
+    function toggleStudent(studentId) {
+      toggleStudentSpecificTask(studentId, currentTaskId);
+    }
+
+    function markAll(status) {
+      const currentClass = getCurrentClass();
+      const task = currentClass.tasks.find(t => t.id === currentTaskId);
+      if (!task) return;
+      if (!task.records) task.records = {};
+      currentClass.students.forEach(s => {
+        task.records[s.id] = status;
+      });
+      saveState();
+    }
+
+    function promptNewTask() {
+      const title = prompt("請輸入作業名稱（例如：數習 p.30-32）：");
+      if (!title || !title.trim()) return;
+      const isExternal = confirm("此項是【代催的科任/外聘作業】嗎？\n[確定] 是科任作業  |  [取消] 本人授課作業");
+      const newId = 't_' + Date.now();
+      const currentClass = getCurrentClass();
+      if (!currentClass.tasks) currentClass.tasks = [];
+      currentClass.tasks.push({
+        id: newId,
+        title: title.trim(),
+        isExternal: isExternal,
+        records: {}
+      });
+      currentTaskId = newId;
+      saveState();
+    }
+
+    function deleteCurrentTask() {
+      const currentClass = getCurrentClass();
+      const task = currentClass.tasks.find(t => t.id === currentTaskId);
+      if (!task) return;
+      if (confirm(`確定要刪除「${task.title}」這項作業嗎？`)) {
+        currentClass.tasks = currentClass.tasks.filter(t => t.id !== currentTaskId);
+        currentTaskId = currentClass.tasks[0]?.id || null;
+        saveState();
+      }
+    }
+
+    function editRosterPrompt() {
+      const currentClass = getCurrentClass();
+      const currentList = currentClass.students.map(s => s.name).join('、');
+      const input = prompt(`請輸入「${currentClass.name}」的學生名冊（以逗號或頓號分隔）：`, currentList);
+      if (!input) return;
+      const names = input.split(/[,、，\s]+/).filter(Boolean);
+      currentClass.students = names.map((name, idx) => ({ id: idx + 1, name: name }));
+      selectedStudentId = null;
+      saveState();
+    }
+
+    function onStudentSelectChange() {
+      const select = document.getElementById('studentSelect');
+      selectedStudentId = Number(select.value);
+      updateIndividualNotice();
+    }
+
+    function selectAndFocusStudent(studentId) {
+      selectedStudentId = studentId;
+      render();
+      const section = document.getElementById('noticeSection');
+      if (section) {
+        section.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      }
+    }
+
+    function updateIndividualNotice() {
+      const currentClass = getCurrentClass();
+      if (!currentClass) return;
+
+      const student = currentClass.students.find(s => s.id === selectedStudentId);
+      const textarea = document.getElementById('noticeText');
+      if (!student) {
+        textarea.value = "尚未選取學生。";
+        return;
+      }
+
+      const tasks = currentClass.tasks || [];
+      let missingTasks = [];
+      let correctingTasks = [];
+
+      tasks.forEach(task => {
+        const status = (task.records || {})[student.id] || 'done';
+        if (status === 'missing') {
+          missingTasks.push(`${task.title}${task.isExternal ? ' (科任)' : ''}`);
+        } else if (status === 'correcting') {
+          correctingTasks.push(`${task.title}${task.isExternal ? ' (科任)' : ''}`);
+        }
+      });
+
+      let text = `家長您好，以下是【${student.name}】今日作業狀況提醒：\n`;
+
+      if (missingTasks.length === 0 && correctingTasks.length === 0) {
+        text += `✨ 今日各項作業均已完成過關，表現非常棒，請家長給予鼓勵！`;
+      } else {
+        if (missingTasks.length > 0) {
+          text += `❌ 尚未繳交作業：\n  • ${missingTasks.join('\n  • ')}\n`;
+        }
+        if (correctingTasks.length > 0) {
+          text += `✏️ 待訂正作業：\n  • ${correctingTasks.join('\n  • ')}\n`;
+        }
+        text += `請家長撥空提醒孩子今日完成補繳或訂正，謝謝您的配合！`;
+      }
+
+      textarea.value = text;
+    }
+
+    function copyNotice() {
+      const textarea = document.getElementById('noticeText');
+      navigator.clipboard.writeText(textarea.value).then(() => {
+        alert("已成功複製該生通報文字！");
+      });
+    }
+
+    function copyAllStudentsSummary() {
+      const currentClass = getCurrentClass();
+      let summaryText = `【${currentClass.name} - 學生未完成作業總清單】\n`;
+      let hasAnyPending = false;
+
+      currentClass.students.forEach(student => {
+        let pending = [];
+        (currentClass.tasks || []).forEach(task => {
+          const status = (task.records || {})[student.id] || 'done';
+          if (status === 'missing') {
+            pending.push(`${task.title} (未交${task.isExternal ? '/科任' : ''})`);
+          } else if (status === 'correcting') {
+            pending.push(`${task.title} (待訂正${task.isExternal ? '/科任' : ''})`);
+          }
+        });
+        if (pending.length > 0) {
+          hasAnyPending = true;
+          summaryText += `● ${student.name}：${pending.join('、')}\n`;
+        }
+      });
+
+      if (!hasAnyPending) {
+        summaryText += "目前全班無任何未完成或待訂正作業，全員過關！";
+      }
+
+      navigator.clipboard.writeText(summaryText.trim()).then(() => {
+        alert("已複製全班學生待辦總清冊！");
+      });
+    }
+
+    function render() {
+      const currentClass = getCurrentClass();
+      if (!currentClass) return;
+
+      // 1. 渲染組別標籤列
+      const classTabsEl = document.getElementById('classTabs');
+      if (classTabsEl) {
+        classTabsEl.innerHTML = '';
+        state.classes.forEach(c => {
+          const isActive = c.id === currentClass.id;
+          const btn = document.createElement('button');
+          btn.onclick = () => switchClass(c.id);
+          btn.className = `px-3.5 py-1.5 text-xs font-semibold rounded-xl border transition ${
+            isActive 
+              ? 'bg-blue-600 text-white border-blue-600 shadow-sm' 
+              : 'bg-slate-100 text-slate-600 border-transparent hover:bg-slate-200'
+          }`;
+          btn.textContent = c.name;
+          classTabsEl.appendChild(btn);
+        });
+      }
+
+      // 2. 渲染作業清單 Chips
+      const taskListEl = document.getElementById('taskList');
+      if (taskListEl) {
+        taskListEl.innerHTML = '';
+        if (!currentClass.tasks) currentClass.tasks = [];
+        if (!currentClass.tasks.find(t => t.id === currentTaskId) && currentClass.tasks.length > 0) {
+          currentTaskId = currentClass.tasks[0].id;
+        }
+
+        currentClass.tasks.forEach(t => {
+          const isActive = t.id === currentTaskId;
+          const btn = document.createElement('button');
+          btn.onclick = () => selectTask(t.id);
+          btn.className = `px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 border transition ${
+            isActive 
+              ? 'bg-blue-600 text-white border-blue-600 shadow-sm' 
+              : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+          }`;
+          
+          let typeBadge = t.isExternal 
+            ? `<span class="px-1.5 py-0.2 text-[10px] rounded ${isActive ? 'bg-blue-700 text-blue-100' : 'bg-amber-100 text-amber-700'}">科任</span>`
+            : '';
+          btn.innerHTML = `${typeBadge} ${t.title}`;
+          taskListEl.appendChild(btn);
+        });
+      }
+
+      // 3. 渲染學生狀態網格
+      const currentTask = currentClass.tasks.find(t => t.id === currentTaskId);
+      const studentGrid = document.getElementById('studentGrid');
+      if (studentGrid) {
+        studentGrid.innerHTML = '';
+
+        if (!currentTask) {
+          document.getElementById('currentTaskTitle').textContent = "尚未建立作業";
+          document.getElementById('currentTaskBadge').textContent = "";
+        } else {
+          document.getElementById('currentTaskTitle').textContent = currentTask.title;
+          const badge = document.getElementById('currentTaskBadge');
+          if (currentTask.isExternal) {
+            badge.textContent = "科任代催作業";
+            badge.className = "text-xs px-2 py-0.5 rounded-full font-medium bg-amber-50 text-amber-700 border border-amber-200";
+          } else {
+            badge.textContent = "授課作業";
+            badge.className = "text-xs px-2 py-0.5 rounded-full font-medium bg-blue-50 text-blue-700 border border-blue-200";
+          }
+
+          currentClass.students.forEach(student => {
+            const records = currentTask.records || {};
+            const status = records[student.id] || 'done';
+
+            const card = document.createElement('button');
+            card.onclick = () => toggleStudent(student.id);
+
+            let colorClasses = "bg-emerald-50 border-emerald-200 text-emerald-800";
+            let statusLabel = "已完成";
+
+            if (status === 'missing') {
+              colorClasses = "bg-rose-50 border-rose-300 text-rose-800 ring-2 ring-rose-400";
+              statusLabel = "未繳交";
+            } else if (status === 'correcting') {
+              colorClasses = "bg-amber-50 border-amber-300 text-amber-800 ring-2 ring-amber-400";
+              statusLabel = "待訂正";
+            }
+
+            card.className = `p-3 rounded-xl border flex flex-col items-center justify-center transition active:scale-95 ${colorClasses}`;
+            card.innerHTML = `
+              <span class="text-sm font-bold truncate max-w-full">${student.name}</span>
+              <span class="text-[10px] mt-1 font-semibold opacity-80">${statusLabel}</span>
+            `;
+            studentGrid.appendChild(card);
+          });
+        }
+      }
+
+      // 4. 渲染矩陣總清冊表格
+      const matrixHeaderRow = document.getElementById('matrixHeaderRow');
+      const matrixTableBody = document.getElementById('matrixTableBody');
+
+      if (matrixHeaderRow && matrixTableBody) {
+        matrixHeaderRow.innerHTML = `<th class="py-2.5 px-3 min-w-[95px] bg-slate-50 sticky left-0 z-10 border-r border-slate-200 text-slate-800">學生姓名</th>`;
+        
+        const tasks = currentClass.tasks || [];
+        tasks.forEach(task => {
+          const th = document.createElement('th');
+          th.className = "py-2.5 px-3 text-center min-w-[110px] border-r border-slate-200";
+          const extTag = task.isExternal ? '<span class="inline-block text-[10px] bg-amber-100 text-amber-700 px-1 py-0.2 rounded ml-1 font-normal">科</span>' : '';
+          th.innerHTML = `<div class="truncate max-w-[130px] mx-auto font-medium text-slate-700" title="${task.title}">${task.title}${extTag}</div>`;
+          matrixHeaderRow.appendChild(th);
+        });
+
+        const thSummary = document.createElement('th');
+        thSummary.className = "py-2.5 px-3 text-center min-w-[85px] bg-slate-100/60 text-slate-700";
+        thSummary.textContent = "待辦項數";
+        matrixHeaderRow.appendChild(thSummary);
+
+        matrixTableBody.innerHTML = '';
+
+        currentClass.students.forEach(student => {
+          const tr = document.createElement('tr');
+          tr.className = "hover:bg-slate-50/80 transition-colors";
+
+          let studentPendingCount = 0;
+          let cellsHtml = '';
+
+          tasks.forEach(task => {
+            const status = (task.records || {})[student.id] || 'done';
+            let cellContent = '';
+
+            if (status === 'missing') {
+              studentPendingCount++;
+              cellContent = `<span class="inline-flex items-center gap-0.5 px-2 py-0.5 rounded text-[11px] font-bold bg-rose-50 text-rose-600 border border-rose-200">❌ 未交</span>`;
+            } else if (status === 'correcting') {
+              studentPendingCount++;
+              cellContent = `<span class="inline-flex items-center gap-0.5 px-2 py-0.5 rounded text-[11px] font-bold bg-amber-50 text-amber-600 border border-amber-200">✏️ 待訂</span>`;
+            } else {
+              cellContent = `<span class="text-slate-300 font-bold">—</span>`;
+            }
+
+            cellsHtml += `
+              <td onclick="toggleStudentSpecificTask(${student.id}, '${task.id}')" class="py-2 px-2 text-center border-r border-slate-100 cursor-pointer select-none hover:bg-slate-100/60 active:scale-95 transition">
+                ${cellContent}
+              </td>
+            `;
+          });
+
+          let rowHtml = `
+            <td class="py-2.5 px-3 bg-white sticky left-0 z-10 border-r border-slate-200 whitespace-nowrap shadow-xs">
+              <div class="flex items-center justify-between gap-2">
+                <span class="font-semibold text-slate-800">${student.name}</span>
+                <button onclick="selectAndFocusStudent(${student.id})" class="text-[10px] text-blue-600 hover:text-blue-700 bg-blue-50 hover:bg-blue-100 px-1.5 py-0.5 rounded font-medium transition" title="以此生產生文案">
+                  文案
+                </button>
+              </div>
+            </td>
+          `;
+
+          rowHtml += cellsHtml;
+
+          let countBadge = '';
+          if (studentPendingCount > 0) {
+            countBadge = `<span class="inline-block px-2 py-0.5 rounded-full text-xs font-bold bg-rose-100 text-rose-700">${studentPendingCount} 項</span>`;
+          } else {
+            countBadge = `<span class="text-emerald-600 font-medium text-xs">✓ 過關</span>`;
+          }
+
+          rowHtml += `
+            <td class="py-2.5 px-3 text-center bg-slate-50/40 whitespace-nowrap">
+              ${countBadge}
+            </td>
+          `;
+
+          tr.innerHTML = rowHtml;
+          matrixTableBody.appendChild(tr);
+        });
+      }
+
+      // 5. 更新個人通報文案區的學生下拉選單
+      const studentSelect = document.getElementById('studentSelect');
+      if (studentSelect) {
+        studentSelect.innerHTML = '';
+        const students = currentClass.students || [];
+
+        if (students.length > 0) {
+          if (!students.find(s => s.id === selectedStudentId)) {
+            const pendingStudent = students.find(s => {
+              return (currentClass.tasks || []).some(t => {
+                const st = (t.records || {})[s.id];
+                return st === 'missing' || st === 'correcting';
+              });
+            });
+            selectedStudentId = pendingStudent ? pendingStudent.id : students[0].id;
+          }
+        } else {
+          selectedStudentId = null;
+        }
+
+        students.forEach(s => {
+          const opt = document.createElement('option');
+          opt.value = s.id;
+          
+          let pendingCount = 0;
+          (currentClass.tasks || []).forEach(t => {
+            const st = (t.records || {})[s.id];
+            if (st === 'missing' || st === 'correcting') pendingCount++;
+          });
+
+          opt.textContent = pendingCount > 0 ? `${s.name} (待辦 ${pendingCount} 項)` : `${s.name} (全過關)`;
+          if (s.id === selectedStudentId) opt.selected = true;
+          studentSelect.appendChild(opt);
+        });
+
+        updateIndividualNotice();
+      }
+    }
+  </script>
+</body>
+</html>
