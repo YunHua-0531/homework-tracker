@@ -24,9 +24,6 @@
         
         <!-- 管理按鈕 -->
         <div class="flex flex-wrap items-center gap-2">
-          <button onclick="restoreDefaultData()" class="text-xs bg-slate-100 hover:bg-slate-200 text-slate-600 px-2.5 py-1.5 rounded-lg transition" title="若資料空白可點此還原示範名冊">
-            🔄 載入示範資料
-          </button>
           <button onclick="renameCurrentClass()" class="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 px-2.5 py-1.5 rounded-lg transition">
             ✏️ 重新命名組別
           </button>
@@ -87,7 +84,7 @@
       <div id="studentGrid" class="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-2.5 pt-2"></div>
     </section>
 
-    <!-- 學生待辦總清冊 (表格化結構) -->
+    <!-- 學生待辦總清冊 (矩陣表格) -->
     <section class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 space-y-4">
       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
         <div>
@@ -101,7 +98,7 @@
         </div>
       </div>
 
-      <!-- 響應式滾動表格容器 -->
+      <!-- 滾動表格容器 -->
       <div class="overflow-x-auto border border-slate-200 rounded-xl">
         <table class="w-full text-xs text-left text-slate-600 border-collapse" id="matrixTable">
           <thead class="bg-slate-50 text-slate-700 font-semibold border-b border-slate-200">
@@ -138,8 +135,7 @@
   <script>
     const DB_ENDPOINT = "https://homework-tracker-f56a7-default-rtdb.firebaseio.com/tracker.json";
 
-    // 基礎範本資料
-    const defaultData = {
+    const fallbackData = {
       activeClassId: 'c1',
       classes: [
         {
@@ -150,36 +146,50 @@
             { id: 't1', title: '國語習作 L5', isExternal: false, records: {} },
             { id: 't2', title: '英文作業 (科任)', isExternal: true, records: {} }
           ]
-        },
-        {
-          id: 'c2',
-          name: '中年級任課班',
-          students: Array.from({ length: 12 }, (_, i) => ({ id: i + 1, name: `${i + 1}號` })),
-          tasks: [
-            { id: 't3', title: '課堂學習單', isExternal: false, records: {} }
-          ]
         }
       ]
     };
 
-    // 初始化狀態：若本機快取無效，保證一定載入 defaultData
-    let state = null;
-    try {
-      const cached = localStorage.getItem('HW_TRACKER_STORE_V2');
-      if (cached) {
-        const parsed = JSON.parse(cached);
-        if (parsed && Array.isArray(parsed.classes) && parsed.classes.length > 0) {
-          state = parsed;
-        }
+    // 智能恢復機制：依序搜尋瀏覽器所有的歷史快取鑰匙
+    function recoverOldData() {
+      const candidateKeys = [
+        'HW_TRACKER_CUSTOM_GROUPS_DATA',
+        'HW_LOCAL_CACHE',
+        'HW_TRACKER_SIMPLE_DATA',
+        'HW_TRACKER_STORE_V2'
+      ];
+
+      for (let key of candidateKeys) {
+        try {
+          const raw = localStorage.getItem(key);
+          if (raw) {
+            const parsed = JSON.parse(raw);
+            // 格式 A：包含 classes 陣列
+            if (parsed && Array.isArray(parsed.classes) && parsed.classes.length > 0) {
+              return parsed;
+            }
+            // 格式 B：極簡版字典物件結構
+            if (parsed && parsed.classes && typeof parsed.classes === 'object') {
+              const convertedClasses = Object.keys(parsed.classes).map(k => ({
+                id: k,
+                name: parsed.classes[k].name || '未命名組別',
+                students: parsed.classes[k].students || [],
+                tasks: parsed.classes[k].tasks || []
+              }));
+              if (convertedClasses.length > 0) {
+                return {
+                  activeClassId: convertedClasses[0].id,
+                  classes: convertedClasses
+                };
+              }
+            }
+          }
+        } catch (e) {}
       }
-    } catch (e) {
-      console.warn("快取讀取異常：", e);
+      return null;
     }
 
-    if (!state) {
-      state = JSON.parse(JSON.stringify(defaultData));
-    }
-
+    let state = recoverOldData() || fallbackData;
     let currentTaskId = state.classes[0]?.tasks[0]?.id || null;
     let selectedStudentId = null;
 
@@ -194,22 +204,22 @@
         el.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></span> 同步中...';
       } else {
         el.className = "inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200";
-        el.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> 本地運作中';
+        el.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> 運作正常';
       }
     }
 
-    // 立即繪製畫面，保證不留白
+    // 先行渲染，確保資料立即可見
     render();
 
-    // 雲端讀取
+    // 雲端連線與同步
     async function fetchCloudData() {
       try {
-        const response = await fetch(DB_ENDPOINT + '?auth=none', { cache: 'no-store' });
+        const response = await fetch(DB_ENDPOINT, { cache: 'no-store' });
         if (response.ok) {
           const val = await response.json();
           if (val && Array.isArray(val.classes) && val.classes.length > 0) {
             state = val;
-            localStorage.setItem('HW_TRACKER_STORE_V2', JSON.stringify(state));
+            saveLocalCache(state);
             const currentClass = getCurrentClass();
             if (!currentClass.tasks.find(t => t.id === currentTaskId)) {
               currentTaskId = currentClass.tasks[0]?.id || null;
@@ -219,15 +229,13 @@
             return;
           }
         }
-        // 若雲端為空，自動推送當前資料建立結構
+        // 雲端若是空的，自動把剛剛復原的本地資料推上雲端保存
         pushCloudData(state);
       } catch (err) {
-        console.warn("雲端讀取暫時使用本機快取：", err);
         updateSyncBadge('local');
       }
     }
 
-    // 雲端寫入
     async function pushCloudData(dataToSave) {
       updateSyncBadge('syncing');
       try {
@@ -236,35 +244,28 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(dataToSave)
         });
-        if (res.ok) {
-          updateSyncBadge('synced');
-        } else {
-          updateSyncBadge('local');
-        }
+        if (res.ok) updateSyncBadge('synced');
+        else updateSyncBadge('local');
       } catch (e) {
         updateSyncBadge('local');
       }
     }
 
-    // 啟動連線
+    function saveLocalCache(data) {
+      localStorage.setItem('HW_TRACKER_STORE_V2', JSON.stringify(data));
+      localStorage.setItem('HW_TRACKER_CUSTOM_GROUPS_DATA', JSON.stringify(data));
+    }
+
+    // 初次載入與背景輪詢
     fetchCloudData();
     setInterval(fetchCloudData, 12000);
-
-    function restoreDefaultData() {
-      if (confirm("確定要載入示範名單與作業嗎？這將覆蓋目前畫面。")) {
-        state = JSON.parse(JSON.stringify(defaultData));
-        currentTaskId = state.classes[0].tasks[0].id;
-        selectedStudentId = null;
-        saveState();
-      }
-    }
 
     function getCurrentClass() {
       return state.classes.find(c => c.id === state.activeClassId) || state.classes[0];
     }
 
     function saveState() {
-      localStorage.setItem('HW_TRACKER_STORE_V2', JSON.stringify(state));
+      saveLocalCache(state);
       pushCloudData(state);
       render();
     }
