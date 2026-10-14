@@ -3,18 +3,26 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>作業追蹤清單</title>
+  <title>作業追蹤清單 - 雲端即時同步版</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <!-- 載入 Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
 </head>
 <body class="bg-slate-50 text-slate-800 min-h-screen p-4 md:p-8 font-sans">
   <div class="max-w-4xl mx-auto space-y-6">
     
-    <!-- 頁首與組別/班級切換 -->
+    <!-- 頂端同步狀態條與組別列 -->
     <header class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 space-y-3">
       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 class="text-xl font-bold text-slate-900 tracking-tight">作業與訂正追蹤簿</h1>
-          <p class="text-xs text-slate-500 mt-0.5">極簡點選 • 本地自動存檔</p>
+          <div class="flex items-center gap-2">
+            <h1 class="text-xl font-bold text-slate-900 tracking-tight">作業與訂正追蹤簿</h1>
+            <span id="cloudStatus" class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-50 text-amber-700 border border-amber-200">
+              <span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span> 連線中...
+            </span>
+          </div>
+          <p class="text-xs text-slate-500 mt-0.5">Firebase 雲端自動同步 • 跨裝置即時更新</p>
         </div>
         
         <!-- 管理按鈕 -->
@@ -31,7 +39,7 @@
         </div>
       </div>
       
-      <!-- 組別分頁標籤列 -->
+      <!-- 組別標籤列 -->
       <div id="classTabs" class="flex flex-wrap gap-2 pt-2 border-t border-slate-100"></div>
     </header>
 
@@ -68,7 +76,7 @@
         </div>
       </div>
 
-      <!-- 狀態說明圖例 -->
+      <!-- 狀態圖例 -->
       <div class="flex gap-4 text-xs text-slate-500">
         <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-emerald-500 inline-block"></span> 點擊切換：已完成</span>
         <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-rose-500 inline-block"></span> 未繳交</span>
@@ -79,7 +87,7 @@
       <div id="studentGrid" class="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-2.5 pt-2"></div>
     </section>
 
-    <!-- 一鍵通報文案區 -->
+    <!-- 通報文案區 -->
     <section class="bg-white p-5 rounded-2xl shadow-sm border border-slate-100 space-y-3">
       <div class="flex items-center justify-between">
         <h2 class="text-sm font-bold text-slate-700">聯絡簿 / LINE 通知文字</h2>
@@ -93,13 +101,35 @@
   </div>
 
   <script>
-    // 預設資料
+    // 您的專屬 Firebase 金鑰設定
+    const firebaseConfig = {
+      apiKey: "AIzaSyDIsW7LOKp069tE5EyufP3YsuBQBqvm5lE",
+      authDomain: "homework-tracker-f56a7.firebaseapp.com",
+      databaseURL: "https://homework-tracker-f56a7-default-rtdb.firebaseio.com",
+      projectId: "homework-tracker-f56a7",
+      storageBucket: "homework-tracker-f56a7.firebasestorage.app",
+      messagingSenderId: "52476086650",
+      appId: "1:52476086650:web:d4b5193729e172c9c36ec3",
+      measurementId: "G-J4SKB9XXEC"
+    };
+
+    // 初始化 Firebase
+    let db = null;
+    let dbRef = null;
+    try {
+      firebase.initializeApp(firebaseConfig);
+      db = firebase.database();
+      dbRef = db.ref('homework_tracker_data');
+    } catch (e) {
+      console.error("Firebase 初始化失敗，請檢查金鑰設定", e);
+    }
+
     const defaultData = {
       activeClassId: 'c1',
       classes: [
         {
           id: 'c1',
-          name: '五年級導師班',
+          name: '高年級導師班',
           students: Array.from({ length: 15 }, (_, i) => ({ id: i + 1, name: `${i + 1}號` })),
           tasks: [
             { id: 't1', title: '國語習作 L5', isExternal: false, records: {} },
@@ -108,7 +138,7 @@
         },
         {
           id: 'c2',
-          name: '六年級科任班',
+          name: '中年級任課班',
           students: Array.from({ length: 12 }, (_, i) => ({ id: i + 1, name: `${i + 1}號` })),
           tasks: [
             { id: 't3', title: '課堂學習單', isExternal: false, records: {} }
@@ -117,21 +147,59 @@
       ]
     };
 
-    // 讀取快取
-    let state = JSON.parse(localStorage.getItem('HW_TRACKER_CUSTOM_GROUPS_DATA'));
-    // 相容性處理：若為舊版格式則重新載入預設
-    if (!state || !Array.isArray(state.classes)) {
-      state = defaultData;
+    let state = defaultData;
+    let currentTaskId = null;
+
+    function updateSyncBadge(status) {
+      const el = document.getElementById('cloudStatus');
+      if (status === 'synced') {
+        el.className = "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200";
+        el.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> 雲端已同步';
+      } else if (status === 'syncing') {
+        el.className = "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-blue-50 text-blue-700 border border-blue-200";
+        el.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></span> 同步中...';
+      } else {
+        el.className = "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-rose-50 text-rose-700 border border-rose-200";
+        el.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-rose-500"></span> 連線異常 (請檢查規則)';
+      }
     }
 
-    let currentTaskId = getCurrentClass()?.tasks[0]?.id || null;
+    // 監聽雲端資料即時更新
+    if (dbRef) {
+      dbRef.on('value', (snapshot) => {
+        const val = snapshot.val();
+        if (val && Array.isArray(val.classes)) {
+          state = val;
+        } else {
+          dbRef.set(defaultData);
+          state = defaultData;
+        }
+        const currentClass = getCurrentClass();
+        if (!currentClass.tasks.find(t => t.id === currentTaskId)) {
+          currentTaskId = currentClass.tasks[0]?.id || null;
+        }
+        updateSyncBadge('synced');
+        render();
+      }, (error) => {
+        console.error(error);
+        updateSyncBadge('error');
+      });
+    }
 
     function getCurrentClass() {
       return state.classes.find(c => c.id === state.activeClassId) || state.classes[0];
     }
 
     function saveState() {
-      localStorage.setItem('HW_TRACKER_CUSTOM_GROUPS_DATA', JSON.stringify(state));
+      updateSyncBadge('syncing');
+      if (dbRef) {
+        dbRef.set(state).then(() => {
+          updateSyncBadge('synced');
+        }).catch((err) => {
+          console.error(err);
+          updateSyncBadge('error');
+        });
+      }
       render();
     }
 
@@ -153,7 +221,7 @@
     }
 
     function addClassPrompt() {
-      const name = prompt("請輸入新組別/班級名稱（例如：高年級社團、三年二班）：");
+      const name = prompt("請輸入新組別/班級名稱：");
       if (!name || !name.trim()) return;
       const newId = 'c_' + Date.now();
       state.classes.push({
@@ -193,6 +261,7 @@
       const task = currentClass.tasks.find(t => t.id === currentTaskId);
       if (!task) return;
 
+      if (!task.records) task.records = {};
       const currentStatus = task.records[studentId] || 'done';
       let nextStatus = 'missing';
       if (currentStatus === 'missing') nextStatus = 'correcting';
@@ -206,6 +275,7 @@
       const currentClass = getCurrentClass();
       const task = currentClass.tasks.find(t => t.id === currentTaskId);
       if (!task) return;
+      if (!task.records) task.records = {};
       currentClass.students.forEach(s => {
         task.records[s.id] = status;
       });
@@ -218,6 +288,7 @@
       const isExternal = confirm("此項是【代催的科任/外聘作業】嗎？\n[確定] 是科任作業  |  [取消] 本人授課作業");
       const newId = 't_' + Date.now();
       const currentClass = getCurrentClass();
+      if (!currentClass.tasks) currentClass.tasks = [];
       currentClass.tasks.push({
         id: newId,
         title: title.trim(),
@@ -258,6 +329,7 @@
 
     function render() {
       const currentClass = getCurrentClass();
+      if (!currentClass) return;
 
       // 1. 渲染組別標籤列
       const classTabsEl = document.getElementById('classTabs');
@@ -279,6 +351,7 @@
       const taskListEl = document.getElementById('taskList');
       taskListEl.innerHTML = '';
 
+      if (!currentClass.tasks) currentClass.tasks = [];
       if (!currentClass.tasks.find(t => t.id === currentTaskId) && currentClass.tasks.length > 0) {
         currentTaskId = currentClass.tasks[0].id;
       }
@@ -294,73 +367,4 @@
         }`;
         
         let typeBadge = t.isExternal 
-          ? `<span class="px-1.5 py-0.2 text-[10px] rounded ${isActive ? 'bg-blue-700 text-blue-100' : 'bg-amber-100 text-amber-700'}">科任</span>`
-          : '';
-        btn.innerHTML = `${typeBadge} ${t.title}`;
-        taskListEl.appendChild(btn);
-      });
-
-      // 3. 渲染學生狀態網格
-      const currentTask = currentClass.tasks.find(t => t.id === currentTaskId);
-      const studentGrid = document.getElementById('studentGrid');
-      studentGrid.innerHTML = '';
-
-      if (!currentTask) {
-        document.getElementById('currentTaskTitle').textContent = "尚未建立作業";
-        document.getElementById('currentTaskBadge').textContent = "";
-        document.getElementById('noticeText').value = "";
-        return;
-      }
-
-      document.getElementById('currentTaskTitle').textContent = currentTask.title;
-      const badge = document.getElementById('currentTaskBadge');
-      if (currentTask.isExternal) {
-        badge.textContent = "科任代催作業";
-        badge.className = "text-xs px-2 py-0.5 rounded-full font-medium bg-amber-50 text-amber-700 border border-amber-200";
-      } else {
-        badge.textContent = "授課作業";
-        badge.className = "text-xs px-2 py-0.5 rounded-full font-medium bg-blue-50 text-blue-700 border border-blue-200";
-      }
-
-      let missingList = [];
-      let correctingList = [];
-
-      currentClass.students.forEach(student => {
-        const status = currentTask.records[student.id] || 'done';
-        if (status === 'missing') missingList.push(student.name);
-        if (status === 'correcting') correctingList.push(student.name);
-
-        const card = document.createElement('button');
-        card.onclick = () => toggleStudent(student.id);
-
-        let colorClasses = "bg-emerald-50 border-emerald-200 text-emerald-800";
-        let statusLabel = "已完成";
-
-        if (status === 'missing') {
-          colorClasses = "bg-rose-50 border-rose-300 text-rose-800 ring-2 ring-rose-400";
-          statusLabel = "未繳交";
-        } else if (status === 'correcting') {
-          colorClasses = "bg-amber-50 border-amber-300 text-amber-800 ring-2 ring-amber-400";
-          statusLabel = "待訂正";
-        }
-
-        card.className = `p-3 rounded-xl border flex flex-col items-center justify-center transition active:scale-95 ${colorClasses}`;
-        card.innerHTML = `
-          <span class="text-sm font-bold truncate max-w-full">${student.name}</span>
-          <span class="text-[10px] mt-1 font-semibold opacity-80">${statusLabel}</span>
-        `;
-        studentGrid.appendChild(card);
-      });
-
-      // 4. 自動產生通知文案
-      let text = `【${currentClass.name} - ${currentTask.title}追蹤通知】\n`;
-      if (currentTask.isExternal) text += `※ 本項為科任老師委請提醒之作業\n`;
-      text += `● 未繳交：${missingList.length ? missingList.join('、') : '全數繳交'}\n`;
-      text += `● 待訂正：${correctingList.length ? correctingList.join('、') : '無'}`;
-      document.getElementById('noticeText').value = text;
-    }
-
-    render();
-  </script>
-</body>
-</html>
+          ? `<span class="px-1.5 py-0.2 text-[10px] rounded ${isActive ? 'bg-blue-700 text-blue-100' : 'bg-amber-100 text-amber-700'}">科任
