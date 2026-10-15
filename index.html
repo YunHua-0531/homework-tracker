@@ -240,7 +240,7 @@
     </div>
   </div>
 
-  <!-- 3. 管理作業項目彈窗 (加入適用組別選單) -->
+  <!-- 3. 管理作業項目彈窗 -->
   <div id="taskModal" class="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
     <div class="bg-white rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4">
       <div class="flex justify-between items-center pb-2 border-b border-slate-100">
@@ -260,9 +260,7 @@
             </div>
             <div>
               <label class="block text-[11px] font-semibold text-slate-600 mb-1">適用組別</label>
-              <select id="newTaskTargetGroup" class="w-full text-xs px-2.5 py-2 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none font-medium text-slate-700">
-                <!-- 動態注入組別選項 -->
-              </select>
+              <select id="newTaskTargetGroup" class="w-full text-xs px-2.5 py-2 bg-white border border-slate-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:outline-none font-medium text-slate-700"></select>
             </div>
           </div>
           <div>
@@ -407,7 +405,18 @@
     let activeStudentForNotice = null;
     let currentTone = "friendly";
 
-    // 狀態循環：已通過 -> 待訂正 -> 未繳交 -> 已訂正
+    // 安全標準化資料結構，防止空值導致 forEach 崩潰
+    function sanitizeAppState(data) {
+      if (!data || typeof data !== 'object') {
+        return JSON.parse(JSON.stringify(defaultData));
+      }
+      return {
+        groups: Array.isArray(data.groups) ? data.groups : [...defaultData.groups],
+        tasks: Array.isArray(data.tasks) ? data.tasks : [],
+        students: Array.isArray(data.students) ? data.students : []
+      };
+    }
+
     const STATUS_FLOW = {
       'missing': 'pass',
       'pass': 'revise',
@@ -433,7 +442,7 @@
       const saved = localStorage.getItem('homework_tracker_data_rtdb');
       if (saved) {
         try {
-          appState = JSON.parse(saved);
+          appState = sanitizeAppState(JSON.parse(saved));
         } catch (e) {
           console.warn("解析本地暫存失敗");
         }
@@ -441,6 +450,7 @@
     }
 
     function persistState() {
+      appState = sanitizeAppState(appState);
       localStorage.setItem('homework_tracker_data_rtdb', JSON.stringify(appState));
       
       fetch(RTDB_BASE_URL, {
@@ -467,9 +477,9 @@
           return res.json();
         })
         .then(data => {
-          if (data && data.students && data.tasks) {
-            appState = data;
-            localStorage.setItem('homework_tracker_data_rtdb', JSON.stringify(data));
+          if (data) {
+            appState = sanitizeAppState(data);
+            localStorage.setItem('homework_tracker_data_rtdb', JSON.stringify(appState));
             renderApp();
           } else {
             persistState();
@@ -491,10 +501,11 @@
             return res.json();
           })
           .then(data => {
-            if (data && data.students && data.tasks) {
-              const incoming = JSON.stringify(data);
+            if (data) {
+              const sanitized = sanitizeAppState(data);
+              const incoming = JSON.stringify(sanitized);
               if (incoming !== JSON.stringify(appState)) {
-                appState = data;
+                appState = sanitized;
                 localStorage.setItem('homework_tracker_data_rtdb', incoming);
                 renderApp();
               }
@@ -516,31 +527,33 @@
       el.innerHTML = `<span class="w-2 h-2 rounded-full ${dotColor}"></span><span>${text}</span>`;
     }
 
-    // 檢查作業是否適用該學生
     function isTaskAssignedToStudent(task, student) {
-      if (!task.targetGroup || task.targetGroup === "全部") return true;
+      if (!task || !task.targetGroup || task.targetGroup === "全部") return true;
       return task.targetGroup === student.group;
     }
 
-    // 介面渲染
     function renderApp() {
+      appState = sanitizeAppState(appState);
       renderStats();
       renderGroupTabs();
       renderMatrix();
     }
 
     function renderStats() {
-      const totalStudents = appState.students.length;
-      document.getElementById('statStudentCount').textContent = totalStudents;
-      document.getElementById('statGroupCount').textContent = `${appState.groups.filter(g => g !== '全部').length} 個組別`;
+      const students = appState.students || [];
+      const tasks = appState.tasks || [];
+      const groups = appState.groups || [];
+
+      document.getElementById('statStudentCount').textContent = students.length;
+      document.getElementById('statGroupCount').textContent = `${groups.filter(g => g !== '全部').length} 個組別`;
 
       let totalAssignedRecords = 0;
       let passCount = 0;
       let reviseCount = 0;
       let missingCount = 0;
 
-      appState.students.forEach(s => {
-        appState.tasks.forEach(t => {
+      students.forEach(s => {
+        tasks.forEach(t => {
           if (isTaskAssignedToStudent(t, s)) {
             totalAssignedRecords++;
             const st = (s.records && s.records[t.id]) || 'missing';
@@ -562,10 +575,13 @@
       const container = document.getElementById('groupTabsContainer');
       container.innerHTML = '';
 
-      appState.groups.forEach(grp => {
+      const groups = appState.groups || [];
+      const students = appState.students || [];
+
+      groups.forEach(grp => {
         const count = grp === '全部' 
-          ? appState.students.length 
-          : appState.students.filter(s => s.group === grp).length;
+          ? students.length 
+          : students.filter(s => s.group === grp).length;
         
         const isActive = activeGroup === grp;
         const btn = document.createElement('button');
@@ -589,7 +605,6 @@
       const query = (document.getElementById('searchInput')?.value || '').trim().toLowerCase();
       const statusFilter = document.getElementById('statusFilter')?.value || 'all';
 
-      // 1. 動態建置表頭
       let headHtml = `
         <tr>
           <th class="py-3 px-3 w-12 text-center">座號</th>
@@ -598,8 +613,8 @@
           <th class="py-3 px-3 text-center min-w-[100px]">待追蹤狀態</th>
       `;
 
-      // 依當前組別篩選欲呈現的作業欄位
-      const visibleTasks = appState.tasks.filter(task => {
+      const tasks = appState.tasks || [];
+      const visibleTasks = tasks.filter(task => {
         if (activeGroup === "全部") return true;
         return !task.targetGroup || task.targetGroup === "全部" || task.targetGroup === activeGroup;
       });
@@ -628,17 +643,16 @@
       headHtml += `<th class="py-3 px-4 text-center min-w-[130px] border-l border-slate-200">操作 / 通知</th></tr>`;
       head.innerHTML = headHtml;
 
-      // 2. 篩選學生清單
-      let filtered = appState.students.filter(student => {
+      const students = appState.students || [];
+      let filtered = students.filter(student => {
         if (activeGroup !== '全部' && student.group !== activeGroup) return false;
         if (query) {
-          const matchName = student.name.toLowerCase().includes(query);
-          const matchSeat = String(student.seat).includes(query);
+          const matchName = (student.name || '').toLowerCase().includes(query);
+          const matchSeat = String(student.seat || '').includes(query);
           if (!matchName && !matchSeat) return false;
         }
         if (statusFilter !== 'all') {
-          // 只針對指派給該學生的作業進行狀態過濾
-          const assignedTasks = appState.tasks.filter(t => isTaskAssignedToStudent(t, student));
+          const assignedTasks = tasks.filter(t => isTaskAssignedToStudent(t, student));
           const statuses = assignedTasks.map(t => (student.records && student.records[t.id]) || 'missing');
           const hasMissing = statuses.includes('missing');
           const hasRevise = statuses.includes('revise');
@@ -652,7 +666,7 @@
       });
 
       filtered.sort((a, b) => Number(a.seat) - Number(b.seat));
-      document.getElementById('displayCountBadge').textContent = `顯示 ${filtered.length} 人 / 總共 ${appState.students.length} 人`;
+      document.getElementById('displayCountBadge').textContent = `顯示 ${filtered.length} 人 / 總共 ${students.length} 人`;
 
       if (filtered.length === 0) {
         body.innerHTML = `
@@ -666,15 +680,14 @@
         return;
       }
 
-      const validGroups = appState.groups.filter(g => g !== '全部');
+      const validGroups = (appState.groups || []).filter(g => g !== '全部');
       let bodyHtml = '';
 
       filtered.forEach(student => {
         let missingCount = 0;
         let reviseCount = 0;
         
-        // 僅統計該生所屬組別適用的作業
-        appState.tasks.forEach(t => {
+        tasks.forEach(t => {
           if (isTaskAssignedToStudent(t, student)) {
             const st = (student.records && student.records[t.id]) || 'missing';
             if (st === 'missing') missingCount++;
@@ -718,7 +731,6 @@
             <td class="py-3 px-3 text-center">${attentionBadge}</td>
         `;
 
-        // 渲染每個作業的互動方塊
         visibleTasks.forEach(task => {
           const isAssigned = isTaskAssignedToStudent(task, student);
 
@@ -769,7 +781,7 @@
     }
 
     function cycleStatus(studentId, taskId) {
-      const student = appState.students.find(s => s.id === studentId);
+      const student = (appState.students || []).find(s => s.id === studentId);
       if (!student) return;
       if (!student.records) student.records = {};
       const curr = student.records[taskId] || 'missing';
@@ -780,10 +792,10 @@
     }
 
     function batchSetTask(taskId, targetStatus) {
-      const task = appState.tasks.find(t => t.id === taskId);
+      const task = (appState.tasks || []).find(t => t.id === taskId);
       if (!task) return;
 
-      appState.students.forEach(s => {
+      (appState.students || []).forEach(s => {
         if (isTaskAssignedToStudent(task, s)) {
           if (!s.records) s.records = {};
           s.records[taskId] = targetStatus;
@@ -797,12 +809,13 @@
     function openStudentModal() {
       const selectSingle = document.getElementById('singleGroupSelect');
       const selectBatch = document.getElementById('batchGroupSelect');
-      const validGroups = appState.groups.filter(g => g !== '全部');
+      const validGroups = (appState.groups || []).filter(g => g !== '全部');
       const groupOptions = validGroups.map(g => `<option value="${g}">${g}</option>`).join('');
       selectSingle.innerHTML = groupOptions;
       selectBatch.innerHTML = groupOptions;
 
-      const maxSeat = appState.students.reduce((max, s) => Math.max(max, Number(s.seat) || 0), 0);
+      const students = appState.students || [];
+      const maxSeat = students.reduce((max, s) => Math.max(max, Number(s.seat) || 0), 0);
       document.getElementById('singleSeat').value = maxSeat + 1;
       document.getElementById('singleName').value = '';
       document.getElementById('batchNames').value = '';
@@ -830,6 +843,8 @@
 
     function submitStudent() {
       const isSingleVisible = !document.getElementById('singleStudentSection').classList.contains('hidden');
+      if (!appState.students) appState.students = [];
+      const tasks = appState.tasks || [];
 
       if (isSingleVisible) {
         const name = document.getElementById('singleName').value.trim();
@@ -848,7 +863,7 @@
           group: group,
           records: {}
         };
-        appState.tasks.forEach(t => {
+        tasks.forEach(t => {
           newStudent.records[t.id] = isTaskAssignedToStudent(t, newStudent) ? 'missing' : 'na';
         });
         appState.students.push(newStudent);
@@ -875,7 +890,7 @@
             group: group,
             records: {}
           };
-          appState.tasks.forEach(t => {
+          tasks.forEach(t => {
             newStudent.records[t.id] = isTaskAssignedToStudent(t, newStudent) ? 'missing' : 'na';
           });
           appState.students.push(newStudent);
@@ -888,12 +903,12 @@
     }
 
     function changeStudentGroupDirectly(studentId, newGroup) {
-      const student = appState.students.find(s => s.id === studentId);
+      const student = (appState.students || []).find(s => s.id === studentId);
       if (!student) return;
       student.group = newGroup;
 
-      // 更新非適用項目的初始狀態
-      appState.tasks.forEach(t => {
+      const tasks = appState.tasks || [];
+      tasks.forEach(t => {
         if (!student.records) student.records = {};
         if (isTaskAssignedToStudent(t, student)) {
           if (!student.records[t.id] || student.records[t.id] === 'na') {
@@ -909,7 +924,7 @@
     }
 
     function deleteStudent(id) {
-      const s = appState.students.find(x => x.id === id);
+      const s = (appState.students || []).find(x => x.id === id);
       if (!s) return;
       if (!confirm(`確定要移除學生「${s.name} (座號 ${s.seat})」嗎？`)) return;
       
@@ -919,7 +934,7 @@
     }
 
     function openEditStudentModal(studentId) {
-      const s = appState.students.find(x => x.id === studentId);
+      const s = (appState.students || []).find(x => x.id === studentId);
       if (!s) return;
 
       document.getElementById('editStudentId').value = s.id;
@@ -927,7 +942,7 @@
       document.getElementById('editStudentSeat').value = s.seat;
 
       const groupSelect = document.getElementById('editStudentGroup');
-      const validGroups = appState.groups.filter(g => g !== '全部');
+      const validGroups = (appState.groups || []).filter(g => g !== '全部');
       groupSelect.innerHTML = validGroups.map(g => `
         <option value="${g}" ${s.group === g ? 'selected' : ''}>${g}</option>
       `).join('');
@@ -950,7 +965,7 @@
         return;
       }
 
-      const student = appState.students.find(x => x.id === id);
+      const student = (appState.students || []).find(x => x.id === id);
       if (student) {
         student.name = name;
         student.seat = isNaN(seat) ? student.seat : seat;
@@ -965,12 +980,11 @@
       deleteStudent(id);
     }
 
-    // ==================== 作業管理 (含組別設定) ====================
+    // ==================== 作業管理 ====================
     function openTaskModal() {
-      // 注入組別選項：全部 (通用作業) + 獨立組別
       const targetGroupSelect = document.getElementById('newTaskTargetGroup');
       let optionsHtml = `<option value="全部">全部學生 (通用作業)</option>`;
-      appState.groups.filter(g => g !== '全部').forEach(g => {
+      (appState.groups || []).filter(g => g !== '全部').forEach(g => {
         optionsHtml += `<option value="${g}">僅 ${g}</option>`;
       });
       targetGroupSelect.innerHTML = optionsHtml;
@@ -985,15 +999,16 @@
 
     function renderTaskList() {
       const list = document.getElementById('taskListContainer');
-      document.getElementById('taskCountBadge').textContent = appState.tasks.length;
+      const tasks = appState.tasks || [];
+      document.getElementById('taskCountBadge').textContent = tasks.length;
       list.innerHTML = '';
 
-      if (appState.tasks.length === 0) {
+      if (tasks.length === 0) {
         list.innerHTML = '<div class="text-xs text-slate-400 py-3 text-center">目前無任何作業項目</div>';
         return;
       }
 
-      appState.tasks.forEach((t, idx) => {
+      tasks.forEach((t, idx) => {
         const div = document.createElement('div');
         div.className = 'py-2.5 flex items-center justify-between text-xs';
         
@@ -1034,10 +1049,11 @@
         desc: desc,
         targetGroup: targetGroup
       };
+
+      if (!appState.tasks) appState.tasks = [];
       appState.tasks.push(newTask);
 
-      // 為所有學生初始化該作業狀態
-      appState.students.forEach(s => {
+      (appState.students || []).forEach(s => {
         if (!s.records) s.records = {};
         s.records[newTask.id] = isTaskAssignedToStudent(newTask, s) ? 'missing' : 'na';
       });
@@ -1052,8 +1068,8 @@
 
     function deleteTask(id) {
       if (!confirm('刪除作業將會同時移除所有學生的這項作業紀錄，確定刪除嗎？')) return;
-      appState.tasks = appState.tasks.filter(t => t.id !== id);
-      appState.students.forEach(s => {
+      appState.tasks = (appState.tasks || []).filter(t => t.id !== id);
+      (appState.students || []).forEach(s => {
         if (s.records && s.records[id]) delete s.records[id];
       });
       persistState();
@@ -1074,9 +1090,12 @@
     function renderGroupList() {
       const container = document.getElementById('groupListContainer');
       container.innerHTML = '';
-      appState.groups.forEach(g => {
+      const groups = appState.groups || [];
+      const students = appState.students || [];
+
+      groups.forEach(g => {
         if (g === '全部') return;
-        const count = appState.students.filter(s => s.group === g).length;
+        const count = students.filter(s => s.group === g).length;
         const div = document.createElement('div');
         div.className = 'flex items-center justify-between p-2 rounded-lg bg-slate-50 border border-slate-200 text-xs';
         div.innerHTML = `
@@ -1090,6 +1109,7 @@
     function addGroup() {
       const name = document.getElementById('newGroupName').value.trim();
       if (!name) return;
+      if (!appState.groups) appState.groups = ["全部"];
       if (appState.groups.includes(name)) {
         alert('該組別已存在！');
         return;
@@ -1102,12 +1122,12 @@
     }
 
     function deleteGroup(g) {
-      const count = appState.students.filter(s => s.group === g).length;
+      const count = (appState.students || []).filter(s => s.group === g).length;
       if (count > 0) {
         alert(`無法刪除組別「${g}」，因為尚有 ${count} 位學生隸屬此組別。請先在表格中變更學生組別。`);
         return;
       }
-      appState.groups = appState.groups.filter(x => x !== g);
+      appState.groups = (appState.groups || []).filter(x => x !== g);
       if (activeGroup === g) activeGroup = '全部';
       persistState();
       renderGroupList();
@@ -1116,7 +1136,7 @@
 
     // ==================== 通知生成邏輯 ====================
     function openSingleNotice(studentId) {
-      activeStudentForNotice = appState.students.find(s => s.id === studentId);
+      activeStudentForNotice = (appState.students || []).find(s => s.id === studentId);
       if (!activeStudentForNotice) return;
       currentTone = 'friendly';
       updateToneButtons();
@@ -1151,8 +1171,7 @@
       const missingTasks = [];
       const reviseTasks = [];
 
-      // 只挑選指派給該學生的作業項目
-      appState.tasks.forEach(t => {
+      (appState.tasks || []).forEach(t => {
         if (isTaskAssignedToStudent(t, s)) {
           const st = (s.records && s.records[t.id]) || 'missing';
           if (st === 'missing') missingTasks.push(t.name);
@@ -1209,7 +1228,7 @@
     // ==================== 全組廣播通知 ====================
     function openBroadcastModal() {
       const select = document.getElementById('broadcastGroupSelect');
-      select.innerHTML = appState.groups.map(g => `<option value="${g}">${g}</option>`).join('');
+      select.innerHTML = (appState.groups || []).map(g => `<option value="${g}">${g}</option>`).join('');
       select.value = activeGroup;
       generateBroadcastText();
       document.getElementById('broadcastModal').classList.remove('hidden');
@@ -1229,9 +1248,12 @@
       const group = document.getElementById('broadcastGroupSelect').value;
       const mask = document.getElementById('maskStudentName').checked;
 
+      const students = appState.students || [];
+      const tasks = appState.tasks || [];
+
       const targetStudents = group === '全部' 
-        ? appState.students 
-        : appState.students.filter(s => s.group === group);
+        ? students 
+        : students.filter(s => s.group === group);
 
       let text = `📢 【${group} 作業進度與訂正總表】\n親愛的家長與同學們好：\n請各位檢視本階段作業繳交及訂正狀況，有待完成者請把握時間完成：\n`;
 
@@ -1241,7 +1263,7 @@
         const missing = [];
         const revise = [];
 
-        appState.tasks.forEach(t => {
+        tasks.forEach(t => {
           if (isTaskAssignedToStudent(t, s)) {
             const st = (s.records && s.records[t.id]) || 'missing';
             if (st === 'missing') missing.push(t.name);
