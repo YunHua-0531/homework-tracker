@@ -28,19 +28,19 @@
           <h1 class="text-lg font-bold text-slate-800 flex items-center gap-2">
             作業訂正與未交追蹤系統
             <span class="text-xs px-2 py-0.5 rounded-full font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
-              <i class="fa-solid fa-cloud mr-1"></i>雲端版
+              <i class="fa-solid fa-cloud mr-1"></i>雲端同步版
             </span>
           </h1>
           <div class="flex items-center gap-2 text-xs">
             <span id="connIndicator" class="inline-flex items-center gap-1.5 text-slate-500 font-medium">
-              <span class="w-2 h-2 rounded-full bg-slate-400"></span>
+              <span class="w-2 h-2 rounded-full bg-amber-400"></span>
               <span>正在連線雲端...</span>
             </span>
           </div>
         </div>
       </div>
 
-      <!-- 右側按鈕群 -->
+      <!-- 右側功能按鈕 -->
       <div class="flex items-center gap-2">
         <button onclick="openBroadcastModal()" class="px-3 py-2 text-xs sm:text-sm font-medium rounded-lg bg-slate-100 text-slate-700 hover:bg-slate-200 transition-colors flex items-center gap-1.5 shadow-sm">
           <i class="fa-solid fa-bullhorn text-slate-500"></i>
@@ -65,7 +65,7 @@
   <!-- 主要內容區 -->
   <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
 
-    <!-- 頂部數據統計摘要卡片 -->
+    <!-- 數據統計摘要小卡 -->
     <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
       <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
         <div class="text-xs font-medium text-slate-500 mb-1">學生總人數</div>
@@ -99,10 +99,8 @@
 
     <!-- 篩選列與搜尋 -->
     <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm space-y-3">
-      <!-- 組別標籤列 -->
       <div class="flex items-center gap-2 overflow-x-auto pb-1" id="groupTabsContainer"></div>
       
-      <!-- 狀態過濾與搜尋 -->
       <div class="flex flex-col sm:flex-row gap-3 pt-2 border-t border-slate-100">
         <div class="relative flex-1">
           <i class="fa-solid fa-magnifying-glass absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
@@ -139,7 +137,6 @@
         </div>
       </div>
 
-      <!-- 表格容器 -->
       <div class="overflow-x-auto">
         <table class="w-full text-left text-sm border-collapse" id="matrixTable">
           <thead id="matrixHead" class="bg-slate-50 text-slate-600 text-xs uppercase font-semibold border-b border-slate-200"></thead>
@@ -161,7 +158,6 @@
         <button onclick="closeStudentModal()" class="text-slate-400 hover:text-slate-600 text-lg">&times;</button>
       </div>
 
-      <!-- 切換模式 -->
       <div class="flex rounded-lg bg-slate-100 p-1 text-xs font-medium">
         <button type="button" id="tabSingleStudent" onclick="switchStudentTab('single')" class="flex-1 py-1.5 rounded-md bg-white text-slate-800 shadow-sm">單筆新增</button>
         <button type="button" id="tabBatchStudent" onclick="switchStudentTab('batch')" class="flex-1 py-1.5 rounded-md text-slate-500 hover:text-slate-800">⚡ 批次名單貼上</button>
@@ -202,7 +198,7 @@
     </div>
   </div>
 
-  <!-- 2. 編輯學生資訊彈窗 (支援改名、改座號、變更組別與刪除) -->
+  <!-- 2. 編輯學生資訊彈窗 -->
   <div id="editStudentModal" class="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
     <div class="bg-white rounded-2xl max-w-sm w-full p-6 shadow-2xl space-y-4">
       <div class="flex justify-between items-center pb-2 border-b border-slate-100">
@@ -368,7 +364,6 @@
 
   <!-- JavaScript 核心控制邏輯 -->
   <script>
-    // 預設示範資料
     const defaultData = {
       groups: ["全部", "高年級數學探究組", "獨立研究A組", "語文素養組"],
       tasks: [
@@ -396,10 +391,8 @@
     let activeGroup = "全部";
     let activeStudentForNotice = null;
     let currentTone = "friendly";
-    let isConnected = false;
-    let sseSource = null;
 
-    // 狀態循環：已通過 (pass) -> 待訂正 (revise) -> 未繳交 (missing) -> 已訂正 (done)
+    // 狀態循環：已通過 -> 待訂正 -> 未繳交 -> 已訂正
     const STATUS_FLOW = {
       'missing': 'pass',
       'pass': 'revise',
@@ -417,7 +410,7 @@
     window.addEventListener('DOMContentLoaded', () => {
       loadLocalState();
       renderApp();
-      connectFirebaseRTDB();
+      initCloudSync();
     });
 
     function loadLocalState() {
@@ -431,7 +424,7 @@
       }
     }
 
-    // 狀態同步與持久化 (雙向：本地即刻 + 遠端雲端)
+    // 寫入雲端與本地
     function persistState() {
       localStorage.setItem('homework_tracker_data_rtdb', JSON.stringify(appState));
       
@@ -439,82 +432,85 @@
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(appState)
-      }).then(res => {
-        if (!res.ok) throw new Error("寫入狀態非 200");
+      })
+      .then(res => {
+        if (!res.ok) throw new Error("寫入失敗，狀態碼: " + res.status);
         updateIndicator(true, "🟢 RTDB 雲端已即時同步");
-      }).catch(err => {
-        console.warn("雲端同步失敗，已轉本地暫存:", err);
-        updateIndicator(false, "🟡 離線暫存中 (請確認 RTDB 規則已設為 true)");
+      })
+      .catch(err => {
+        console.warn("寫入雲端失敗:", err);
+        updateIndicator(false, "🔴 雲端連線被拒 (請檢查 Firebase 規則)");
       });
     }
 
-    // 連線 Firebase Realtime Database
-    function connectFirebaseRTDB() {
-      updateIndicator(false, "正在連線 RTDB...", "bg-amber-400");
+    // 初次載入與自動定時輪詢 (每 3 秒自動抓取跨裝置最新進度)
+    function initCloudSync() {
+      updateIndicator(false, "正在連線雲端...", "bg-amber-400");
 
-      fetch(RTDB_BASE_URL)
-        .then(res => res.json())
+      // 1. 初次讀取
+      fetch(`${RTDB_BASE_URL}?t=${Date.now()}`)
+        .then(res => {
+          if (!res.ok) throw new Error("讀取被拒");
+          return res.json();
+        })
         .then(data => {
           if (data && data.students && data.tasks) {
             appState = data;
-            localStorage.setItem('homework_tracker_data_rtdb', JSON.stringify(appState));
+            localStorage.setItem('homework_tracker_data_rtdb', JSON.stringify(data));
             renderApp();
           } else {
             persistState();
           }
-          initEventSource();
+          updateIndicator(true, "🟢 RTDB 雲端已即時同步");
         })
         .catch(err => {
-          console.warn("無法取得初始資料，使用本地預設:", err);
-          updateIndicator(false, "🟡 離線模式 (請確認 RTDB 規則已設為 true)");
+          console.warn("初次讀取失敗:", err);
+          updateIndicator(false, "🔴 雲端讀取失敗 (請檢查 Firebase 規則)");
         });
-    }
 
-    // 透過 Server-Sent Events 達成毫秒級跨裝置即時推送
-    function initEventSource() {
-      if (sseSource) sseSource.close();
-      sseSource = new EventSource(RTDB_BASE_URL);
+      // 2. 定時檢查雲端變動 (防打字干擾)
+      setInterval(() => {
+        const activeEl = document.activeElement;
+        if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA')) return;
 
-      sseSource.addEventListener('put', (e) => {
-        try {
-          const payload = JSON.parse(e.data);
-          if (payload.path === "/" && payload.data) {
-            appState = payload.data;
-            localStorage.setItem('homework_tracker_data_rtdb', JSON.stringify(appState));
-            renderApp();
-          }
-        } catch (err) {
-          console.error("解析即時串流失敗", err);
-        }
-      });
-
-      sseSource.onopen = () => {
-        isConnected = true;
-        updateIndicator(true, "🟢 RTDB 雲端已即時同步");
-      };
-
-      sseSource.onerror = () => {
-        updateIndicator(false, "🟡 雲端連線不穩定 (持續重試中)");
-      };
+        fetch(`${RTDB_BASE_URL}?t=${Date.now()}`)
+          .then(res => {
+            if (!res.ok) throw new Error("讀取被拒");
+            return res.json();
+          })
+          .then(data => {
+            if (data && data.students && data.tasks) {
+              const incoming = JSON.stringify(data);
+              if (incoming !== JSON.stringify(appState)) {
+                appState = data;
+                localStorage.setItem('homework_tracker_data_rtdb', incoming);
+                renderApp();
+              }
+              updateIndicator(true, "🟢 RTDB 雲端已即時同步");
+            }
+          })
+          .catch(() => {
+            updateIndicator(false, "🔴 同步中斷 (請檢查 Rules 設定)");
+          });
+      }, 3000);
     }
 
     function updateIndicator(online, text, colorClass) {
       const el = document.getElementById('connIndicator');
       if (!el) return;
-      const dotColor = colorClass || (online ? 'bg-emerald-500' : 'bg-slate-400');
-      const textColor = online ? 'text-emerald-700 font-semibold' : 'text-slate-500';
+      const dotColor = colorClass || (online ? 'bg-emerald-500' : 'bg-rose-500');
+      const textColor = online ? 'text-emerald-700 font-semibold' : 'text-slate-600 font-medium';
       el.className = `inline-flex items-center gap-1.5 text-xs ${textColor}`;
       el.innerHTML = `<span class="w-2 h-2 rounded-full ${dotColor}"></span><span>${text}</span>`;
     }
 
-    // 主渲染流程
+    // 介面渲染
     function renderApp() {
       renderStats();
       renderGroupTabs();
       renderMatrix();
     }
 
-    // 統計小卡
     function renderStats() {
       const totalStudents = appState.students.length;
       document.getElementById('statStudentCount').textContent = totalStudents;
@@ -542,7 +538,6 @@
       document.getElementById('statMissingCount').textContent = missingCount;
     }
 
-    // 組別標籤列
     function renderGroupTabs() {
       const container = document.getElementById('groupTabsContainer');
       container.innerHTML = '';
@@ -568,14 +563,12 @@
       });
     }
 
-    // 矩陣看板 (包含即時組別下拉與刪除/編輯操作)
     function renderMatrix() {
       const head = document.getElementById('matrixHead');
       const body = document.getElementById('matrixBody');
       const query = (document.getElementById('searchInput')?.value || '').trim().toLowerCase();
       const statusFilter = document.getElementById('statusFilter')?.value || 'all';
 
-      // 1. 動態建置表頭
       let headHtml = `
         <tr>
           <th class="py-3 px-3 w-12 text-center">座號</th>
@@ -602,7 +595,6 @@
       headHtml += `<th class="py-3 px-4 text-center min-w-[130px] border-l border-slate-200">操作 / 通知</th></tr>`;
       head.innerHTML = headHtml;
 
-      // 2. 篩選學生
       let filtered = appState.students.filter(student => {
         if (activeGroup !== '全部' && student.group !== activeGroup) return false;
         if (query) {
@@ -638,11 +630,9 @@
         return;
       }
 
-      // 可選的有效組別（排除「全部」）
       const validGroups = appState.groups.filter(g => g !== '全部');
-
-      // 3. 渲染學生列
       let bodyHtml = '';
+
       filtered.forEach(student => {
         let missingCount = 0;
         let reviseCount = 0;
@@ -664,7 +654,6 @@
           `;
         }
 
-        // 組別下拉選單 HTML
         const groupOptions = validGroups.map(grp => `
           <option value="${grp}" ${student.group === grp ? 'selected' : ''}>${grp}</option>
         `).join('');
@@ -680,7 +669,6 @@
                 </button>
               </div>
             </td>
-            <!-- 即時組別切換選單 -->
             <td class="py-3 px-3">
               <select onchange="changeStudentGroupDirectly('${student.id}', this.value)"
                 class="text-xs bg-slate-50 hover:bg-white focus:bg-white border border-slate-200 rounded-md px-2 py-1 text-slate-700 font-medium focus:outline-none focus:ring-1 focus:ring-emerald-500 cursor-pointer">
@@ -690,7 +678,6 @@
             <td class="py-3 px-3 text-center">${attentionBadge}</td>
         `;
 
-        // 作業互動方格
         appState.tasks.forEach(task => {
           const currentStatus = (student.records && student.records[task.id]) || 'missing';
           const meta = STATUS_MAP[currentStatus] || STATUS_MAP['missing'];
@@ -705,7 +692,6 @@
           `;
         });
 
-        // 操作列：一鍵通知與刪除按鈕
         bodyHtml += `
             <td class="py-2.5 px-3 text-center border-l border-slate-200">
               <div class="flex items-center justify-center gap-1.5">
@@ -729,7 +715,6 @@
       body.innerHTML = bodyHtml;
     }
 
-    // 狀態循環切換
     function cycleStatus(studentId, taskId) {
       const student = appState.students.find(s => s.id === studentId);
       if (!student) return;
@@ -741,7 +726,6 @@
       renderApp();
     }
 
-    // 整欄批次切換
     function batchSetTask(taskId, targetStatus) {
       appState.students.forEach(s => {
         if (!s.records) s.records = {};
@@ -751,7 +735,7 @@
       renderApp();
     }
 
-    // ==================== 學生管理 (新增/編輯/移除/組別更動) ====================
+    // ==================== 學生管理 ====================
     function openStudentModal() {
       const selectSingle = document.getElementById('singleGroupSelect');
       const selectBatch = document.getElementById('batchGroupSelect');
@@ -841,7 +825,6 @@
       closeStudentModal();
     }
 
-    // 表格內直接切換組別
     function changeStudentGroupDirectly(studentId, newGroup) {
       const student = appState.students.find(s => s.id === studentId);
       if (!student) return;
@@ -850,18 +833,16 @@
       renderApp();
     }
 
-    // 刪除學生
     function deleteStudent(id) {
       const s = appState.students.find(x => x.id === id);
       if (!s) return;
-      if (!confirm(`確定要移除學生「${s.name} (座號 ${s.seat})」嗎？其相關作業進度將一併清除。`)) return;
+      if (!confirm(`確定要移除學生「${s.name} (座號 ${s.seat})」嗎？`)) return;
       
       appState.students = appState.students.filter(x => x.id !== id);
       persistState();
       renderApp();
     }
 
-    // 編輯學生資訊彈窗
     function openEditStudentModal(studentId) {
       const s = appState.students.find(x => x.id === studentId);
       if (!s) return;
@@ -1195,7 +1176,6 @@
       });
     }
 
-    // 載入示範資料
     function loadSampleData() {
       if (!confirm("確定要重置並載入示範資料嗎？現有資料將被覆蓋。")) return;
       appState = JSON.parse(JSON.stringify(defaultData));
