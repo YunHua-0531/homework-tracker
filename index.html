@@ -3,8 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>作業追蹤清單 - 雲端即時同步版</title>
+  <title>作業追蹤清單 - 真雲端同步版</title>
   <script src="https://cdn.tailwindcss.com"></script>
+  <!-- 官方 Firebase SDK (v8 穩定相容版) -->
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
 </head>
 <body class="bg-slate-50 text-slate-800 min-h-screen p-4 md:p-8 font-sans">
   <div class="max-w-5xl mx-auto space-y-6">
@@ -15,15 +18,18 @@
         <div>
           <div class="flex items-center gap-2">
             <h1 class="text-xl font-bold text-slate-900 tracking-tight">作業與訂正追蹤簿</h1>
-            <span id="cloudStatus" class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200">
-              <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> 運作正常
+            <span id="cloudStatus" class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-amber-50 text-amber-700 border border-amber-200">
+              <span class="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span> 雲端連線中...
             </span>
           </div>
-          <p class="text-xs text-slate-500 mt-0.5">Firebase 雲端自動同步 • 跨裝置即時更新</p>
+          <p class="text-xs text-slate-500 mt-0.5">Firebase 雙向即時同步 • 跨裝置零時差更新</p>
         </div>
         
         <!-- 管理按鈕 -->
         <div class="flex flex-wrap items-center gap-2">
+          <button onclick="forceSyncFromCloud()" class="text-xs bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-semibold px-2.5 py-1.5 rounded-lg border border-emerald-200 transition" title="清除本機快取，完全重新抓取雲端">
+            🔄 強制同步雲端
+          </button>
           <button onclick="renameCurrentClass()" class="text-xs bg-slate-100 hover:bg-slate-200 text-slate-700 px-2.5 py-1.5 rounded-lg transition">
             ✏️ 重新命名組別
           </button>
@@ -133,9 +139,17 @@
   </div>
 
   <script>
-    const DB_ENDPOINT = "https://homework-tracker-f56a7-default-rtdb.firebaseio.com/tracker.json";
+    const firebaseConfig = {
+      apiKey: "AIzaSyDIsW7LOKp069tE5EyufP3YsuBQBqvm5lE",
+      authDomain: "homework-tracker-f56a7.firebaseapp.com",
+      databaseURL: "https://homework-tracker-f56a7-default-rtdb.firebaseio.com",
+      projectId: "homework-tracker-f56a7",
+      storageBucket: "homework-tracker-f56a7.firebasestorage.app",
+      messagingSenderId: "52476086650",
+      appId: "1:52476086650:web:d4b5193729e172c9c36ec3"
+    };
 
-    const fallbackData = {
+    const initialTemplate = {
       activeClassId: 'c1',
       classes: [
         {
@@ -150,50 +164,11 @@
       ]
     };
 
-    // 智能恢復機制：依序搜尋瀏覽器所有的歷史快取鑰匙
-    function recoverOldData() {
-      const candidateKeys = [
-        'HW_TRACKER_CUSTOM_GROUPS_DATA',
-        'HW_LOCAL_CACHE',
-        'HW_TRACKER_SIMPLE_DATA',
-        'HW_TRACKER_STORE_V2'
-      ];
-
-      for (let key of candidateKeys) {
-        try {
-          const raw = localStorage.getItem(key);
-          if (raw) {
-            const parsed = JSON.parse(raw);
-            // 格式 A：包含 classes 陣列
-            if (parsed && Array.isArray(parsed.classes) && parsed.classes.length > 0) {
-              return parsed;
-            }
-            // 格式 B：極簡版字典物件結構
-            if (parsed && parsed.classes && typeof parsed.classes === 'object') {
-              const convertedClasses = Object.keys(parsed.classes).map(k => ({
-                id: k,
-                name: parsed.classes[k].name || '未命名組別',
-                students: parsed.classes[k].students || [],
-                tasks: parsed.classes[k].tasks || []
-              }));
-              if (convertedClasses.length > 0) {
-                return {
-                  activeClassId: convertedClasses[0].id,
-                  classes: convertedClasses
-                };
-              }
-            }
-          }
-        } catch (e) {}
-      }
-      return null;
-    }
-
-    let state = recoverOldData() || fallbackData;
+    let state = initialTemplate;
     let currentTaskId = state.classes[0]?.tasks[0]?.id || null;
     let selectedStudentId = null;
 
-    function updateSyncBadge(status) {
+    function updateSyncBadge(status, text) {
       const el = document.getElementById('cloudStatus');
       if (!el) return;
       if (status === 'synced') {
@@ -201,73 +176,83 @@
         el.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> 雲端已同步';
       } else if (status === 'syncing') {
         el.className = "inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-blue-50 text-blue-700 border border-blue-200";
-        el.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></span> 同步中...';
+        el.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse"></span> 寫入雲端中...';
       } else {
-        el.className = "inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200";
-        el.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span> 運作正常';
+        el.className = "inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-rose-50 text-rose-700 border border-rose-200";
+        el.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-rose-500"></span> ${text || '連線受阻'}`;
       }
     }
 
-    // 先行渲染，確保資料立即可見
     render();
 
-    // 雲端連線與同步
-    async function fetchCloudData() {
-      try {
-        const response = await fetch(DB_ENDPOINT, { cache: 'no-store' });
-        if (response.ok) {
-          const val = await response.json();
-          if (val && Array.isArray(val.classes) && val.classes.length > 0) {
+    let dbRef = null;
+    try {
+      if (!firebase.apps.length) {
+        firebase.initializeApp(firebaseConfig);
+      }
+      const db = firebase.database();
+      dbRef = db.ref('cloud_homework_data');
+
+      // 監聽雲端資料庫（完全以雲端為唯一真實來源）
+      dbRef.on('value', (snapshot) => {
+        const val = snapshot.val();
+        if (val && Array.isArray(val.classes) && val.classes.length > 0) {
+          state = val;
+          const currentClass = getCurrentClass();
+          if (!currentClass.tasks.find(t => t.id === currentTaskId)) {
+            currentTaskId = currentClass.tasks[0]?.id || null;
+          }
+          updateSyncBadge('synced');
+          render();
+        } else {
+          dbRef.set(initialTemplate).then(() => {
+            updateSyncBadge('synced');
+          });
+        }
+      }, (error) => {
+        console.error("Firebase 連線失敗：", error);
+        updateSyncBadge('error', '權限不足或連線失敗');
+      });
+    } catch (e) {
+      console.error("Firebase 初始化失敗：", e);
+      updateSyncBadge('error', 'SDK 異常');
+    }
+
+    function forceSyncFromCloud() {
+      // 清空本機快取，直接強制向雲端索取最新資料
+      localStorage.clear();
+      if (dbRef) {
+        updateSyncBadge('syncing');
+        dbRef.once('value').then(snap => {
+          const val = snap.val();
+          if (val && Array.isArray(val.classes)) {
             state = val;
-            saveLocalCache(state);
-            const currentClass = getCurrentClass();
-            if (!currentClass.tasks.find(t => t.id === currentTaskId)) {
-              currentTaskId = currentClass.tasks[0]?.id || null;
-            }
+            currentTaskId = state.classes[0]?.tasks[0]?.id || null;
             updateSyncBadge('synced');
             render();
-            return;
+            alert("已成功從雲端同步最新名冊！");
+          } else {
+            alert("雲端資料庫目前為空，請直接在畫面上新增名冊。");
           }
-        }
-        // 雲端若是空的，自動把剛剛復原的本地資料推上雲端保存
-        pushCloudData(state);
-      } catch (err) {
-        updateSyncBadge('local');
-      }
-    }
-
-    async function pushCloudData(dataToSave) {
-      updateSyncBadge('syncing');
-      try {
-        const res = await fetch(DB_ENDPOINT, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(dataToSave)
         });
-        if (res.ok) updateSyncBadge('synced');
-        else updateSyncBadge('local');
-      } catch (e) {
-        updateSyncBadge('local');
       }
-    }
-
-    function saveLocalCache(data) {
-      localStorage.setItem('HW_TRACKER_STORE_V2', JSON.stringify(data));
-      localStorage.setItem('HW_TRACKER_CUSTOM_GROUPS_DATA', JSON.stringify(data));
-    }
-
-    // 初次載入與背景輪詢
-    fetchCloudData();
-    setInterval(fetchCloudData, 12000);
-
-    function getCurrentClass() {
-      return state.classes.find(c => c.id === state.activeClassId) || state.classes[0];
     }
 
     function saveState() {
-      saveLocalCache(state);
-      pushCloudData(state);
+      if (dbRef) {
+        updateSyncBadge('syncing');
+        dbRef.set(state).then(() => {
+          updateSyncBadge('synced');
+        }).catch((err) => {
+          alert("【雲端寫入失敗】：" + err.message);
+          updateSyncBadge('error', '同步受阻');
+        });
+      }
       render();
+    }
+
+    function getCurrentClass() {
+      return state.classes.find(c => c.id === state.activeClassId) || state.classes[0];
     }
 
     function switchClass(classId) {
